@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>เข้าสู่ระบบ · 中文小老师</title>
+  <link rel="stylesheet" href="/assets/style.css?v=5">
+  <style>
+    .login-shell { min-height: 100vh; display: flex; flex-direction: column;
+      padding: var(--s-4) var(--s-4) calc(var(--s-7) + env(safe-area-inset-bottom)); }
+    .login-topbar { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0 var(--s-4); }
+    .login-topbar img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); }
+    .login-topbar .app-name { font-weight: 800; font-size: 1.05rem; color: var(--c-text); }
+    .login-topbar .app-sub { font-size: .75rem; color: var(--c-muted); }
+    .login-hero { display: flex; flex-direction: column; align-items: center; padding: var(--s-2) 0 var(--s-3); }
+    .login-title { font-size: 1.3rem; font-weight: 800; color: var(--c-text); }
+    .login-sub { color: var(--c-muted); font-size: .9rem; margin-top: 2px; }
+    .login-card { background: #fff; border-radius: var(--r-xl); padding: var(--s-6) var(--s-5);
+      box-shadow: var(--sh-3); margin-top: var(--s-5); }
+    .login-mascot { display: flex; justify-content: center; margin-top: var(--s-2); }
+    .login-mascot svg { width: 72px; height: 72px; }
+    .err-banner { background: #fdeae5; color: #c0392b; padding: var(--s-3) var(--s-4);
+      border-radius: var(--r-sm); font-size: .9rem; margin-bottom: var(--s-3); display: none; }
+    .err-banner.show { display: block; }
+    select, input[type=text], input[type=password] { padding: 14px 16px;
+      border: 2px solid var(--c-line-2); border-radius: 14px; font-size: 1rem;
+      font-family: inherit; width: 100%; background: #fff; color: var(--c-text);
+      transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+    select:focus, input:focus { outline: none; border-color: var(--c-primary);
+      box-shadow: 0 0 0 4px rgba(31,138,95,.12); }
+  </style>
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-topbar">
+      <img src="/assets/logo.jpg" alt="logo">
+      <div>
+        <div class="app-name">中文小老师</div>
+        <div class="app-sub">ครูจีน AI · 学生登录</div>
+      </div>
+    </div>
+
+    <div class="login-hero">
+      <div class="login-title">สวัสดี 欢迎回来 👋</div>
+      <div class="login-sub">选择班级 · 输入姓名和学号登录</div>
+    </div>
+
+    <!-- 吉祥物挥手 -->
+    <div class="login-mascot">
+      <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="60" cy="60" r="55" fill="#fff" stroke="#1f8a5f" stroke-width="3"/>
+        <!-- 耳朵 -->
+        <circle cx="32" cy="42" r="14" fill="#1f3d33"/>
+        <circle cx="88" cy="42" r="14" fill="#1f3d33"/>
+        <!-- 眼睛 -->
+        <circle cx="48" cy="58" r="4" fill="#1f3d33"/>
+        <circle cx="72" cy="58" r="4" fill="#1f3d33"/>
+        <circle cx="48" cy="58" r="1.5" fill="#fff"/>
+        <circle cx="72" cy="58" r="1.5" fill="#fff"/>
+        <!-- 鼻子 -->
+        <ellipse cx="60" cy="70" rx="3" ry="2" fill="#1f3d33"/>
+        <!-- 嘴 -->
+        <path d="M 54 76 Q 60 80 66 76" stroke="#1f3d33" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <!-- 腮红 -->
+        <circle cx="38" cy="68" r="4" fill="#ff9999" opacity="0.6"/>
+        <circle cx="82" cy="68" r="4" fill="#ff9999" opacity="0.6"/>
+        <!-- 挥手的手 -->
+        <g transform="translate(85 50) rotate(-30)">
+          <ellipse cx="0" cy="0" rx="8" ry="10" fill="#fff" stroke="#1f8a5f" stroke-width="2"/>
+          <path d="M -4 -2 L -4 -10 M 0 -3 L 0 -12 M 4 -2 L 4 -10" stroke="#1f8a5f" stroke-width="1.5" stroke-linecap="round"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="card login-card fade-in">
+      <div id="err" class="err-banner"></div>
+
+      <label>บทเรียน · 班级 / ห้องเรียน</label>
+      <select id="class">
+        <option value="">— เลือกบทเรียน 选择班级 —</option>
+        <option value="M4/1">M4/1 · 初一理科</option>
+        <option value="M4/2">M4/2 · 初一文科</option>
+        <option value="M5/1">M5/1 · 初二理科</option>
+        <option value="M5/2">M5/2 · 初二文科</option>
+        <option value="M6/1">M6/1 · 初三理科</option>
+        <option value="M6/2">M6/2 · 初三文科</option>
+      </select>
+
+      <label>ชื่อ · 姓名</label>
+      <input id="name" type="text" placeholder="พิมพ์ชื่อของคุณ 输入姓名" autocomplete="off">
+
+      <label>รหัสนักเรียน · 学号（密码）</label>
+      <input id="sno" type="password" placeholder="กรอกรหัสนักเรียน 输入学号" autocomplete="off">
+
+      <button class="btn btn-primary btn-block btn-xl" id="btn-login" style="margin-top: var(--s-5)">เข้าสู่ระบบ 登录</button>
+      <button class="btn btn-ghost btn-block" id="btn-dev" style="margin-top: var(--s-3); font-size: .85rem; color: var(--c-muted)">调试入口（/dev/ 后门）</button>
+    </div>
+
+    <p class="muted" style="text-align:center; margin-top: var(--s-4); font-size: .8rem">
+      💡 首次登录系统会自动为你建档<br>首次登录会创建你的学习记录
+    </p>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function showErr(msg) {
+      const e = $("err");
+      e.textContent = msg; e.classList.add("show");
+    }
+    function clearErr() { $("err").classList.remove("show"); }
+
+    $("btn-login").onclick = async () => {
+      clearErr();
+      const class_id = $("class").value;
+      const display_name = $("name").value.trim();
+      const student_no = $("sno").value.trim();
+      if (!class_id) return showErr("请选择班级 / กรุณาเลือกบทเรียน");
+      if (!display_name) return showErr("请填写姓名 / กรุณากรอกชื่อ");
+      if (!student_no) return showErr("请填写学号（密码）/ กรุณากรอกรหัสนักเรียน");
+      $("btn-login").disabled = true; $("btn-login").textContent = "登录中...";
+      try {
+        const r = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ class_id, display_name, student_no })
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          throw new Error(t.includes("密码") || t.includes("401") ? "学号（密码）错误，请重试" : t);
+        }
+        const data = await r.json();
+        localStorage.setItem("session_token", data.token);
+        localStorage.setItem("class_id", data.student.class_id);
+        localStorage.setItem("track", data.student.track);
+        localStorage.setItem("display_name", data.student.display_name);
+        location.href = "home.html";
+      } catch (e) {
+        showErr(typeof e.message === "string" ? e.message : "登录失败");
+        $("btn-login").disabled = false; $("btn-login").textContent = "เข้าสู่ระบบ 登录";
+      }
+    };
+    $("btn-dev").onclick = () => location.href = "/dev/";
+  </script>
+</body>
+</html>

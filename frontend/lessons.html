@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>课程学习 · บทเรียนของฉัน</title>
+  <link rel="stylesheet" href="/assets/style.css?v=5">
+  <style>
+    .lessons-hero { padding: var(--s-4); display: flex; align-items: center; gap: var(--s-3); }
+    .lessons-hero h1 { font-size: 1.1rem; }
+    .lesson-row { display: block; padding: var(--s-5); margin: 0 var(--s-4) var(--s-3);
+      background: #fff; border-radius: var(--r-lg); box-shadow: var(--sh-1);
+      text-decoration: none; color: inherit; transition: all var(--t-norm);
+      position: relative; overflow: hidden; }
+    .lesson-row:active { transform: scale(.98); }
+    .lesson-row .lr-num { font-size: .78rem; color: var(--c-muted); font-weight: 600;
+      letter-spacing: .05em; }
+    .lesson-row .lr-title { font-size: 1.15rem; font-weight: 700; color: var(--c-text);
+      margin-top: 2px; font-family: "Noto Sans SC", sans-serif; }
+    .lesson-row .lr-meta { display: flex; gap: var(--s-3); font-size: .8rem;
+      color: var(--c-muted); margin-top: var(--s-2); }
+    .lesson-row .lr-bar { height: 5px; background: var(--c-line); border-radius: 3px;
+      margin-top: var(--s-3); overflow: hidden; }
+    .lesson-row .lr-bar span { display: block; height: 100%;
+      background: linear-gradient(90deg, var(--c-primary), var(--c-primary-d)); }
+    .lesson-row .lr-badge { position: absolute; top: var(--s-4); right: var(--s-4);
+      background: var(--c-primary); color: #fff; padding: 3px 10px;
+      border-radius: 999px; font-size: .7rem; font-weight: 700; }
+    .empty-state { text-align: center; padding: var(--s-7) var(--s-5); color: var(--c-muted); }
+    .empty-state svg { width: 80px; height: 80px; margin: 0 auto var(--s-3); display: block; }
+  </style>
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=6"></script>
+  <script>
+    if (!App.requireLogin()) {/* redirected */} else { render(); }
+
+    async function render() {
+      const app = document.getElementById("app");
+      const me = { display_name: localStorage.getItem("display_name") || "学生" };
+      let lessons = [];
+      try {
+        const r = await App.call("/api/lessons");
+        lessons = r.lessons || [];
+      } catch (e) { /* ignore */ }
+      const cards = lessons.length
+        ? lessons.map((l, i) => `
+          <a class="lesson-row" href="lesson.html?lesson=${l.lesson_no}">
+            ${i === 0 ? '<div class="lr-badge">▶ เริ่มเลย 开始</div>' : ''}
+            <div class="lr-num">บทที่ ${l.lesson_no}</div>
+            <div class="lr-title">${App.escapeHtml(l.title)}</div>
+            <div class="lr-bar"><span style="width:0%"></span></div>
+            <div class="lr-meta"><span>${App.escapeHtml(l.title.length)} 字</span></div>
+          </a>`).join("")
+        : `<div class="empty-state">
+            <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="40" cy="40" r="36" fill="#fff" stroke="#1f8a5f" stroke-width="3"/>
+              <circle cx="20" cy="26" r="9" fill="#1f3d33"/>
+              <circle cx="60" cy="26" r="9" fill="#1f3d33"/>
+              <circle cx="34" cy="40" r="2.5" fill="#1f3d33"/>
+              <circle cx="46" cy="40" r="2.5" fill="#1f3d33"/>
+              <path d="M 34 50 Q 40 54 46 50" stroke="#1f3d33" stroke-width="2" fill="none" stroke-linecap="round"/>
+            </svg>
+            <div>ยังไม่มีบทเรียนที่ได้รับมอบหมาย</div>
+            <div style="margin-top:6px;font-size:.85rem">还没有分配给你的课程 · 请老师分配</div>
+          </div>`;
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← หน้าหลัก</a>
+          <h1>📚 课程学习 · บทเรียนของฉัน</h1>
+        </div>
+        <div class="app-wrap fade-in">${cards}</div>`;
+    }
+  </script>
+</body>
+</html>

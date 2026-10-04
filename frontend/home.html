@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>หน้าหลัก · 中文小老师</title>
+  <link rel="stylesheet" href="/assets/style.css?v=5">
+  <style>
+    .home-hero { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-4) var(--s-3); }
+    .home-hero img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); }
+    .home-hero .name { font-weight: 700; font-size: 1.05rem; color: var(--c-text); }
+    .home-hero .role { color: var(--c-muted); font-size: .8rem; }
+    .home-hero .logout { margin-left: auto; padding: 8px 14px; border-radius: 999px;
+      background: transparent; color: var(--c-muted); border: none; font-size: .85rem; }
+    .entry-grid { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
+    .entry-card { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-5) var(--s-5);
+      background: #fff; border-radius: var(--r-xl); box-shadow: var(--sh-2);
+      text-decoration: none; color: inherit; transition: all var(--t-norm); position: relative; overflow: hidden; }
+    .entry-card:active { transform: scale(.98); }
+    .entry-card .ec-icon { width: 64px; height: 64px; border-radius: 20px;
+      background: linear-gradient(135deg, var(--c-primary), var(--c-primary-d));
+      color: #fff; display: flex; align-items: center; justify-content: center;
+      font-size: 1.8rem; flex-shrink: 0; box-shadow: 0 4px 12px rgba(31,138,95,.25); }
+    .entry-card.ask .ec-icon { background: linear-gradient(135deg, #2e6cb0, #1f4e8a); box-shadow: 0 4px 12px rgba(46,108,176,.25); }
+    .entry-card.stats .ec-icon { background: linear-gradient(135deg, #d9902e, #b86d1d); box-shadow: 0 4px 12px rgba(217,144,46,.25); }
+    .entry-card .ec-text { flex: 1; }
+    .entry-card .ec-zh { font-weight: 700; font-size: 1.1rem; color: var(--c-text); font-family: "Noto Sans SC", sans-serif; }
+    .entry-card .ec-th { color: var(--c-muted); font-size: .85rem; margin-top: 2px; }
+    .entry-card .ec-arrow { color: var(--c-muted); font-size: 1.2rem; }
+    .home-mascot { display: flex; justify-content: center; margin: var(--s-6) 0 var(--s-4); }
+    .home-mascot svg { width: 100px; height: 100px; }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <div class="home-hero">
+      <img src="/assets/logo.jpg" alt="">
+      <div>
+        <div class="name" id="who">学生</div>
+        <div class="role">สวัสดี · 欢迎回来</div>
+      </div>
+      <button class="logout" id="btn-out">ออกจากระบบ 退出</button>
+    </div>
+
+    <div class="entry-grid">
+      <a class="entry-card ask" href="ask.html">
+        <div class="ec-icon">💬</div>
+        <div class="ec-text">
+          <div class="ec-zh">AI 提问</div>
+          <div class="ec-th">ถามครู AI · 用泰/英/中提问</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card lessons" href="lessons.html">
+        <div class="ec-icon">📚</div>
+        <div class="ec-text">
+          <div class="ec-zh">课程学习</div>
+          <div class="ec-th">เรียนตามบทที่ได้รับ · 按分配的课学习</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card stats" href="progress.html">
+        <div class="ec-icon">📊</div>
+        <div class="ec-text">
+          <div class="ec-zh">数据统计</div>
+          <div class="ec-th">ความคืบหน้า · 你的学习进度</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+    </div>
+
+    <div class="home-mascot">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="46" fill="#fff" stroke="#1f8a5f" stroke-width="3"/>
+        <circle cx="26" cy="32" r="11" fill="#1f3d33"/>
+        <circle cx="74" cy="32" r="11" fill="#1f3d33"/>
+        <circle cx="42" cy="50" r="3" fill="#1f3d33"/>
+        <circle cx="58" cy="50" r="3" fill="#1f3d33"/>
+        <circle cx="42" cy="50" r="1" fill="#fff"/>
+        <circle cx="58" cy="50" r="1" fill="#fff"/>
+        <ellipse cx="50" cy="60" rx="2.5" ry="1.5" fill="#1f3d33"/>
+        <path d="M 45 65 Q 50 70 55 65" stroke="#1f3d33" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <text x="50" y="88" text-anchor="middle" font-size="10" fill="#1f8a5f" font-weight="600">加油！</text>
+      </svg>
+    </div>
+  </div>
+
+  <script src="/assets/app.js?v=6"></script>
+  <script>
+    if (!App.requireLogin()) {
+      // 跳走
+    } else {
+      const me = JSON.parse(localStorage.getItem("me_cache") || "null") || { display_name: localStorage.getItem("display_name") || "学生" };
+      document.getElementById("who").textContent = me.display_name;
+      document.getElementById("btn-out").onclick = () => {
+        if (confirm("确认退出登录？· ยืนยันออกจากระบบ?")) App.logout();
+      };
+    }
+  </script>
+</body>
+</html>

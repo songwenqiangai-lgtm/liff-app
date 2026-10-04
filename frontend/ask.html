@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ถามครู AI · 询问 AI</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <link rel="stylesheet" href="/assets/style.css?v=4">
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=6"></script>
+  <script>
+    const LANGS = [
+      { code: "th", label: "ไทย 泰语", rec: "th-TH" },
+      { code: "en", label: "English 英语", rec: "en-US" },
+      { code: "zh", label: "中文", rec: "zh-CN" },
+    ];
+    let history = [], lang = "th", recorder = null;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      render();
+    })();
+
+    function render() {
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="/">← กลับ 返回</a>
+          <h1>💬 ถามครู AI · 询问 AI</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in chat-shell">
+          <div class="lang-pills">
+            ${LANGS.map(l => `<button class="lang-pill ${l.code === lang ? 'active' : ''}" data-lang="${l.code}">${l.label}</button>`).join("")}
+          </div>
+          <div class="chat-stream" id="chat">
+            ${history.length === 0 ? '<div class="muted" style="text-align:center;padding: var(--s-7) 0">พิมพ์คำถามของคุณเริ่มได้เลย<br>用泰/英/中文提问，AI 回答你</div>' : ""}
+            ${history.map(m => renderMsg(m)).join("")}
+          </div>
+          <div class="chat-toolbar">
+            <div class="exercise-input">
+              <textarea id="ask-input" placeholder="พิมพ์คำถาม... 泰/英/中" rows="2"></textarea>
+              <div class="exercise-input-row">
+                <button class="btn btn-secondary" id="btn-mic">🎤 พูด 语音</button>
+                <button class="btn btn-primary btn-lg" id="btn-send">ส่ง 发送</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      document.querySelectorAll("[data-lang]").forEach(b => b.onclick = () => { lang = b.dataset.lang; render(); });
+      document.getElementById("btn-mic").onclick = toggleMic;
+      document.getElementById("btn-send").onclick = send;
+      document.getElementById("ask-input").addEventListener("keydown", e => {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+      });
+      scrollChat();
+    }
+
+    function renderMsg(m) {
+      return `<div class="chat-msg ${m.role}">
+        <div class="role">${m.role === "me" ? "คุณ" : "ครู AI"}</div>
+        <div class="text">${App.escapeHtml(m.text)}</div>
+      </div>`;
+    }
+
+    async function send() {
+      const ta = document.getElementById("ask-input");
+      const q = ta.value.trim();
+      if (!q) return;
+      history.push({ role: "me", text: q });
+      ta.value = "";
+      render();
+      await new Promise(r => setTimeout(r, 50));
+      const chat = document.getElementById("chat");
+      const waiting = document.createElement("div");
+      waiting.className = "chat-msg ai fade-in";
+      waiting.innerHTML = '<div class="role">ครู AI</div><div class="text"><span class="muted">⏳ กำลังคิด...</span></div>';
+      chat.appendChild(waiting); scrollChat();
+      try {
+        const r = await App.call("/api/ask", { method: "POST", body: JSON.stringify({ question: q, lang }) });
+        history.push({ role: "ai", text: r.answer || "" });
+        waiting.remove();
+        render();
+      } catch (e) {
+        waiting.remove();
+        history.push({ role: "ai", text: "❌ 错误，请重试" });
+        render();
+      }
+    }
+
+    function toggleMic() {
+      if (!App.speechSupported()) { alert("此设备不支持语音识别"); return; }
+      const btn = document.getElementById("btn-mic");
+      if (recorder) { recorder.stop(); recorder = null; btn.textContent = "🎤 พูด 语音"; return; }
+      const langRec = LANGS.find(l => l.code === lang).rec;
+      btn.textContent = "⏺ กำลังฟัง... 正在听";
+      recorder = App.speech(langRec,
+        (final) => { const ta = document.getElementById("ask-input"); ta.value += (ta.value ? "" : "") + final; },
+        (interim) => { document.getElementById("ask-input").placeholder = interim || "พิมพ์คำถาม..."; },
+        () => { recorder = null; btn.textContent = "🎤 พูด 语音"; });
+    }
+
+    function scrollChat() {
+      const c = document.getElementById("chat");
+      if (c) c.scrollTop = c.scrollHeight;
+    }
+  </script>
+</body>
+</html>

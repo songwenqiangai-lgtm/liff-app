@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ฝึกภาษาจีน · 练习</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div id="app" class="loading">กำลังโหลด... 正在加载</div>
+  <script src="/assets/app.js?v=6"></script>
+  <script>
+    const MODULE = new URLSearchParams(location.search).get("module") || "pattern";
+    let ITEMS = [], idx = 0, busy = false;
+
+    (async () => {
+      const app = document.getElementById("app");
+      const idToken = await App.boot();
+      if (!idToken) return;
+      try {
+        await App.ensureStudent(idToken);
+      } catch (e) {
+        location.href = "/";
+        return;
+      }
+      const phase = await App.call("/api/phase");
+      const mod = phase.modules.find(m => m.key === MODULE);
+      if (!mod || !mod.available) {
+        app.innerHTML = `
+          <div class="card">
+            <h2>🌙 ครูจีน AI พักผ่อนช่วงนี้</h2>
+            <p class="muted">${phase.note || "รอช่วงถัดไปนะ"}</p>
+          </div>
+          <a class="btn btn-secondary btn-block" href="/">← กลับหน้าหลัก 返回</a>`;
+        return;
+      }
+      try {
+        const data = await App.call("/api/items?module=" + MODULE);
+        ITEMS = data.items;
+      } catch (e) {
+        app.innerHTML = '<div class="card"><p class="muted">ยังไม่มีแบบฝึกหัดในหมวดนี้ (本模块暂无题目)</p></div>';
+        return;
+      }
+      if (!ITEMS.length) {
+        app.innerHTML = '<div class="card"><p class="muted">ยังไม่มีแบบฝึกหัด (暂无题目)</p></div>';
+        return;
+      }
+      render();
+    })();
+
+    function render() {
+      const app = document.getElementById("app");
+      const it = ITEMS[idx];
+      app.innerHTML = `
+        <p class="muted">ข้อที่ ${idx + 1} / ${ITEMS.length} · <a href="/">หน้าหลัก</a></p>
+        <div class="card">
+          <div class="prompt-zh">${it.prompt_zh}</div>
+          <div class="prompt-th">${it.prompt_th || ""}</div>
+          <textarea id="input" placeholder="พิมพ์คำตอบภาษาจีนที่นี่... 在这里输入你的答案"></textarea>
+          <button class="btn btn-primary btn-block" id="btn-submit">ส่งคำตอบ 提交</button>
+          <div id="feedback"></div>
+        </div>`;
+      document.getElementById("btn-submit").onclick = submit;
+    }
+
+    async function submit() {
+      if (busy) return;
+      const input = document.getElementById("input").value.trim();
+      if (!input) return;
+      busy = true;
+      const btn = document.getElementById("btn-submit");
+      btn.disabled = true; btn.textContent = "ครู AI กำลังดู... AI老师在看...";
+      const fb = document.getElementById("feedback");
+      try {
+        const r = await App.call("/api/feedback", {
+          method: "POST",
+          body: JSON.stringify({ module: MODULE, item_id: ITEMS[idx].id, input_text: input }),
+        });
+        const verdictTh = { correct: "✅ เยี่ยมมาก!", partial: "💡 เกือบถูกแล้ว!", incorrect: "💡 ลองใหม่อีกครั้งนะ" }[r.verdict] || "";
+        fb.innerHTML = `
+          <div class="feedback-box">
+            <div>${verdictTh}</div>
+            <div>${r.feedback_th || ""}</div>
+            ${r.example_zh ? `<span class="zh">📄 ${r.example_zh}</span>` : ""}
+          </div>
+          <div class="hint-row">
+            ${r.hint1_th ? '<button class="btn btn-secondary" data-h="1">💡 คำใบ้ที่ 1 (提示)</button>' : ""}
+            ${r.hint2_th ? '<button class="btn btn-secondary" data-h="2">💡💡 คำใบ้ที่ 2 (强提示)</button>' : ""}
+            ${r.example_zh ? '<button class="btn btn-secondary" data-h="3">📖 ตัวอย่าง (例句)</button>' : ""}
+            ${r.answer_zh ? '<button class="btn btn-secondary" data-h="4">✅ เฉลย (答案)</button>' : ""}
+          </div>
+          <div id="reveals"></div>
+          <button class="btn btn-primary btn-block" id="btn-next">ข้อถัดไป 下一题 →</button>`;
+        document.getElementById("btn-next").onclick = () => {
+          idx = (idx + 1) % ITEMS.length;
+          render();
+        };
+        const HINTS = { 1: r.hint1_th, 2: r.hint2_th, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
+        fb.querySelectorAll("[data-h]").forEach(b => {
+          b.onclick = async () => {
+            const lv = parseInt(b.dataset.h);
+            b.disabled = true;
+            const div = document.createElement("div");
+            div.className = "revealed";
+            div.innerHTML = "<b>คำใบ้:</b> " + HINTS[lv];
+            document.getElementById("reveals").appendChild(div);
+            App.call("/api/hint", {
+              method: "POST",
+              body: JSON.stringify({ module: MODULE, item_id: ITEMS[idx].id, hint_level: lv }),
+            }).catch(() => {});
+          };
+        });
+      } catch (e) {
+        fb.innerHTML = '<div class="feedback-box error-text">เกิดข้อผิดพลาด ลองอีกครั้ง (出错了，请重试)</div>';
+      } finally {
+        busy = false;
+        btn.disabled = false; btn.textContent = "ส่งคำตอบ 提交";
+      }
+    }
+  </script>
+</body>
+</html>

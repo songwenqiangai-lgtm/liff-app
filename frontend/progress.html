@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ความคืบหน้า · 我的进度</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <link rel="stylesheet" href="/assets/style.css?v=4">
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=6"></script>
+  <script>
+    let ME = null, DATA = null;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      const app = document.getElementById("app");
+      try { ME = await App.call("/api/me"); }
+      catch { location.href = "/"; return; }
+      try { DATA = await App.call("/api/progress"); }
+      catch (e) { app.innerHTML = '<div class="app-wrap"><div class="card">โหลดไม่สำเร็จ</div></div>'; return; }
+      render();
+    })();
+
+    function render() {
+      const app = document.getElementById("app");
+      const MODULE_LABELS = { pattern: "句型", vocab: "词汇", chat: "会话", writing: "写作" };
+      const stats = [
+        { num: DATA.submissions, lbl: "แบบฝึกหัดที่ทำ · 提交次数" },
+        { num: DATA.active_days, lbl: "วันที่ใช้งาน · 活跃天数" },
+        { num: DATA.hint_requests, lbl: "ขอคำใบ้ · 提示次数" },
+        { num: DATA.answer_views, lbl: "ดูเฉลย · 看答案" },
+      ];
+      const byModule = Object.entries(DATA.by_module || {}).map(([k, v]) => ({
+        key: k, name: MODULE_LABELS[k] || k, count: v, max: Math.max(...Object.values(DATA.by_module))
+      }));
+
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="/">← กลับ 返回</a>
+          <h1>📊 ความคืบหน้า · 我的进度</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+          <div class="card" style="text-align:center;background:linear-gradient(135deg,var(--c-primary-l),var(--c-primary-bg));border:none">
+            <div style="font-size:.85rem;color:var(--c-primary-d);font-weight:600;text-transform:uppercase;letter-spacing:.05em">สวัสดี</div>
+            <div style="font-size:1.3rem;font-weight:700;color:var(--c-text);margin-top:4px">${App.escapeHtml(ME.display_name || "")}</div>
+            <div class="muted" style="margin-top: var(--s-2)">ยินดีต้อนรับกลับมา · 欢迎回来</div>
+          </div>
+          <div class="stat-grid">
+            ${stats.map(s => `<div class="stat-card"><div class="num t-mono">${s.num}</div><div class="lbl">${s.lbl}</div></div>`).join("")}
+          </div>
+          ${byModule.length ? `<div class="card">
+            <h2 style="margin-bottom: var(--s-3)">📚 แยกตามหมวด · 分模块</h2>
+            ${byModule.map(m => `
+              <div class="module-row">
+                <div class="name">${App.escapeHtml(m.name)}</div>
+                <div class="bar"><span style="width:${m.max ? (m.count / m.max * 100) : 0}%"></span></div>
+                <div class="count t-mono">${m.count}</div>
+              </div>`).join("")}
+          </div>` : ""}
+          <div class="card" style="text-align:center;background:var(--c-accent-l);border:none">
+            <div style="font-size:1rem;color:var(--c-accent);font-weight:600">💡 ลองทำเองก่อนดูเฉลยนะ · 自己先做再看答案</div>
+            <div style="color:var(--c-text-2);margin-top: var(--s-2);font-size:.85rem">ความคืบหน้าดีขึ้นทุกวัน! 每天进步一点点</div>
+          </div>
+        </div>`;
+    }
+  </script>
+</body>
+</html>

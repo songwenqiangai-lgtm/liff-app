@@ -1,0 +1,28 @@
+# Render 部署配置（Blueprint）
+# 连接 GitHub 仓库后在 Render 导入此文件即可
+services:
+  - type: web
+    name: liff-app
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: LLM_BASE_URL
+        value: https://api.deepseek.com/v1
+      - key: LLM_MODEL
+        value: deepseek-chat
+      - key: LLM_API_KEY
+        sync: false   # 在 Render 后台填入你的 DeepSeek key
+      - key: LLM_BASE_URL_MM
+        value: https://api.minimaxi.com/v1
+      - key: LLM_MODEL_MM
+        value: MiniMax-M2.7
+      - key: LLM_API_KEY_MM
+        sync: false   # 在 Render 后台填入你的 MiniMax key
+      - key: SESSION_SECRET
+        sync: false   # 会话签名密钥
+      - key: TEACHER_PASSWORD
+        sync: false   # 教师端密码
+      - key: DEV_LOGIN_ENABLED
+        value: "0"    # 生产环境关闭调试后门

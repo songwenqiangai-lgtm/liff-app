@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>บทเรียน · 课程</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <link rel="stylesheet" href="/assets/style.css?v=4">
+  <style>
+    /* 课文每句布局 */
+    .sent-line { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0;
+      border-bottom: 1px dashed transparent; }
+    .sent-line:hover { background: rgba(31,138,95,.04); border-radius: 6px; }
+    .sent-zh { flex: 1; font-family: "Noto Sans SC", sans-serif; }
+    .sent-mini-play { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 50%;
+      background: var(--c-primary-l); color: var(--c-primary-d); display: inline-flex;
+      align-items: center; justify-content: center; border: none; cursor: pointer; font-size: .9rem; }
+    /* 音节色块 */
+    .syll { display: inline-block; padding: 2px 6px; margin: 0 2px; border-radius: 6px;
+      font-weight: 600; }
+    .syll.tone-1 { background: rgba(220,80,80,.15); color: #c0392b; }
+    .syll.tone-2 { background: rgba(240,180,40,.18); color: #b8860b; }
+    .syll.tone-3 { background: rgba(80,170,120,.15); color: #1f8a5f; }
+    .syll.tone-4 { background: rgba(90,140,200,.15); color: #2e6cb0; }
+    /* 单词大字带拼音 */
+    .word-zh { font-family: "Noto Sans SC", sans-serif; font-size: 1.15rem; font-weight: 700;
+      margin-right: 8px; }
+    .word-py { font-family: "Noto Sans SC", sans-serif; font-size: .8rem; color: var(--c-muted); }
+    /* 闪卡大字呼吸 */
+    .flash-word-mark { position: relative; }
+  </style>
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=6"></script>
+  <script>
+    const LESSON = new URLSearchParams(location.search).get("lesson") || "1";
+    const MODULE = new URLSearchParams(location.search).get("module") || "";
+    const MODULE_LABELS = { pattern: "句型操练", vocab: "词汇", chat: "会话", writing: "写作" };
+    let DATA = null, exIdx = 0, exBusy = false, vocabIdx = 0;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      const app = document.getElementById("app");
+      try {
+        DATA = await App.call("/api/lesson?lesson=" + LESSON);
+      } catch (e) {
+        app.innerHTML = '<div class="app-wrap"><div class="card"><p class="muted">โหลดข้อมูลไม่สำเร็จ</p></div></div>';
+        return;
+      }
+      if (MODULE) renderModule(MODULE);
+      else renderGrid();
+    })();
+
+    /* ===== 课程主页：2×3 模块网格 ===== */
+    function renderGrid() {
+      const app = document.getElementById("app");
+      const title = DATA.text ? DATA.text.title : ("บทที่ " + LESSON);
+      const modules = [
+        { key: "vocab", icon: "📖", zh: "单词", th: "คำศัพท์", on: true },
+        { key: "text", icon: "📄", zh: "课文", th: "บทอ่าน", on: true },
+        { key: "grammar", icon: "✏️", zh: "语法", th: "ไวยากรณ์", on: true },
+        { key: "exercise", icon: "🏋️", zh: "练习", th: "แบบฝึกหัด", on: DATA.sections.exercise },
+        { key: "pronounce", icon: "🗣️", zh: "发音", th: "ออกเสียง", on: DATA.sections.exercise },
+        { key: "exam", icon: "📝", zh: "考试", th: "ข้อสอบ", on: DATA.sections.exam },
+      ];
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="/">← กลับ 返回</a>
+          <h1 class="t-cn">${App.escapeHtml(title)}</h1>
+          <a class="btn btn-ghost btn-icon" href="lesson.html?lesson=${Math.min(parseInt(LESSON) + 1, 99)}" title="下一课">→</a>
+        </div>
+        <div class="app-wrap fade-in">
+          <p class="muted" style="text-align:center;margin-top: var(--s-2)">เลือกหัวข้อเพื่อเริ่มเรียน · 选择模块开始学习</p>
+          <div class="module-grid-2">
+            ${modules.map(m => `
+              <a class="module-card ${m.on ? "" : "locked"}" ${m.on ? `href="lesson.html?lesson=${LESSON}&module=${m.key}"` : ""}>
+                <div class="mc-icon">${m.icon}</div>
+                <div class="mc-zh">${m.zh}</div>
+                <div class="mc-th">${m.th}</div>
+                ${m.on ? '<div class="mc-arrow">→</div>' : ""}
+              </a>`).join("")}
+          </div>
+        </div>`;
+    }
+
+    /* ===== 模块内容页（点击卡片进入） ===== */
+    function renderModule(key) {
+      const app = document.getElementById("app");
+      const title = DATA.text ? DATA.text.title : ("บทที่ " + LESSON);
+      const labels = { vocab: ["📖", "单词"], text: ["📄", "课文"], grammar: ["✏️", "语法"],
+        exercise: ["🏋️", "练习"], pronounce: ["🗣️", "发音"], exam: ["📝", "考试"] };
+      const [icon, zh] = labels[key] || ["", ""];
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="lesson.html?lesson=${LESSON}">← บทเรียน</a>
+          <h1 class="t-cn">${icon} ${App.escapeHtml(zh)} · ${App.escapeHtml(title)}</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+          <div id="tab-content"></div>
+        </div>`;
+      const el = document.getElementById("tab-content");
+      if (key === "vocab") renderVocab(el);
+      else if (key === "text") renderText(el);
+      else if (key === "grammar") renderGrammar(el);
+      else if (key === "exercise") renderExercise(el);
+      else if (key === "pronounce") renderPronounce(el);
+      else if (key === "exam") renderExam(el);
+      window.scrollTo({ top: 0 });
+    }
+
+    /* ===== 单词闪卡 ===== */
+    function renderVocab(el) {
+      const words = DATA.vocab || [];
+      if (!words.length) { el.innerHTML = '<div class="card muted" style="text-align:center">ยังไม่มีคำศัพท์</div>'; return; }
+      if (vocabIdx >= words.length) vocabIdx = 0;
+      const w = words[vocabIdx];
+      el.innerHTML = `
+        <div class="card flashcard fade-in" id="flashcard">
+          <div class="flash-card-toolbar">
+              <button class="btn btn-secondary btn-sm" id="vocab-list-btn">📋 词表 (${words.length})</button>
+              <span class="muted t-mono">${vocabIdx + 1} / ${words.length}</span>
+            </div>
+            <button class="btn btn-primary btn-block btn-lg" id="vocab-say" style="margin: var(--s-4) 0">🔊 ฟังเสียง · 听发音</button>
+            <div class="flash-word flash-word-mark">${App.escapeHtml(w.word)}</div>
+            <div class="flash-pinyin">${App.escapeHtml(w.pinyin || "")}</div>
+            <div class="flash-meaning">${App.escapeHtml(w.meaning_th || "")}</div>
+            ${w.example_zh ? `<div class="flash-example">📝 ${App.escapeHtml(w.example_zh)}</div>` : ""}
+            <div class="flash-card-actions">
+              <button class="btn btn-secondary btn-lg" id="vocab-prev" ${vocabIdx === 0 ? "disabled" : ""}>‹ ก่อนหน้า</button>
+              <button class="btn btn-primary btn-lg" id="vocab-next" ${vocabIdx === words.length - 1 ? "disabled" : ""}>ถัดไป ›</button>
+            </div>
+            <div class="flash-progress" style="margin-top: var(--s-4)">
+              <div class="bar"><span style="width:${((vocabIdx + 1) / words.length) * 100}%"></span></div>
+            </div>
+          </div>
+          <div id="vocab-list" style="display:none"></div>`;
+      document.getElementById("vocab-say").onclick = () => w.audio_url && new Audio(w.audio_url).play();
+      document.getElementById("vocab-prev").onclick = () => { vocabIdx--; renderVocab(el); };
+      document.getElementById("vocab-next").onclick = () => { vocabIdx++; renderVocab(el); };
+      document.getElementById("vocab-list-btn").onclick = () => {
+        const box = document.getElementById("vocab-list");
+        if (box.style.display === "none") {
+          box.style.display = "block";
+          box.innerHTML = `<div class="card">${words.map((v, i) =>
+            `<div class="vocab-list-item ${i === vocabIdx ? 'active' : ''}" data-i="${i}">
+              <span class="word-zh">${App.escapeHtml(v.word)}</span><span class="word-py">${App.escapeHtml(v.pinyin || "")}</span>
+              <span style="flex:1"></span><span style="font-size:.85rem;color:var(--c-muted)">${App.escapeHtml(v.meaning_th || "")}</span>
+            </div>`).join("")}</div>`;
+          box.querySelectorAll("[data-i]").forEach(b => b.onclick = () => { vocabIdx = parseInt(b.dataset.i); renderVocab(el); window.scrollTo({top:0,behavior:'smooth'}); });
+        } else box.style.display = "none";
+      };
+    }
+
+    /* ===== 课文 ===== */
+    function renderText(el) {
+      const t = DATA.text;
+      if (!t) { el.innerHTML = '<div class="card muted" style="text-align:center">ยังไม่มีบทอ่าน</div>'; return; }
+      const zh = t.body_zh || "";
+      const th = t.body_th || "";
+      const sents = zh.match(/[^。！？\n]+[。！？]?/g) || [zh];
+      const thSents = th.match(/[^。！？\n]+[。！？]?/g) || [];
+      const sentRows = sents.map((s, i) => `
+        <div class="sent-line">
+          <span class="sent-zh t-cn">${App.escapeHtml(s.trim())}</span>
+          <button class="sent-mini-play" data-zi="${i}" title="朗读">🔊</button>
+        </div>`).join("");
+      const thRows = thSents.map(s => `<p style="margin-top: var(--s-2)">${App.escapeHtml(s.trim())}</p>`).join("");
+      el.innerHTML = `
+        <div class="card text-card fade-in">
+          <h2 style="margin-bottom: var(--s-2)">📄 บทอ่าน · 课文</h2>
+          ${t.audio_url ? `<button class="btn btn-primary btn-block btn-lg" id="text-say" style="margin-bottom: var(--s-4)">🔊 ฟังบทอ่าน · 播放全文</button>` : ""}
+          <div class="zh">${sentRows}</div>
+          ${th ? `<div class="th">${thRows}</div>` : ""}
+        </div>
+        <p class="muted" style="text-align:center;margin-top: var(--s-4)">🔊 = 单句朗读 · 点击右侧</p>`;
+      const btnSay = document.getElementById("text-say");
+      if (btnSay) btnSay.onclick = () => t.audio_url && new Audio(t.audio_url).play();
+      el.querySelectorAll("[data-zi]").forEach(b => {
+        b.onclick = () => {
+          const text = sents[parseInt(b.dataset.zi)] || "";
+          if (!text) return;
+          fetch("/api/tts?text=" + encodeURIComponent(text)).then(r => r.ok ? r.blob() : null)
+            .then(blob => { if (blob) new Audio(URL.createObjectURL(blob)).play();
+              else if (window.speechSynthesis) {
+                const u = new SpeechSynthesisUtterance(text); u.lang = "zh-CN"; window.speechSynthesis.speak(u);
+              }
+            });
+        };
+      });
+    }
+
+    /* ===== 语法 ===== */
+    function renderGrammar(el) {
+      const g = DATA.grammar || [];
+      if (!g.length) { el.innerHTML = '<div class="card muted" style="text-align:center">ยังไม่มีไวยากรณ์</div>'; return; }
+      el.innerHTML = `<h2 style="margin-top: var(--s-3)">✏️ ไวยากรณ์ · 语法</h2>` + g.map(p => `
+        <div class="card grammar-card fade-in">
+          <div class="grammar-point t-cn">${App.escapeHtml(p.point)}</div>
+          <div class="grammar-explain">${App.escapeHtml(p.explanation_th || "")}</div>
+          ${(p.example_zh || p.example_th) ? `<div class="grammar-example">
+            <div class="ex-zh">${App.escapeHtml(p.example_zh || "")}</div>
+            <div class="ex-th">${App.escapeHtml(p.example_th || "")}</div>
+          </div>` : ""}
+        </div>`).join("");
+    }
+
+    /* ===== 练习 ===== */
+    function renderExercise(el) {
+      const items = DATA.exercises;
+      if (!items.length) { el.innerHTML = '<div class="card muted" style="text-align:center">ยังไม่มีแบบฝึกหัด</div>'; return; }
+      const it = items[exIdx];
+      el.innerHTML = `
+        <div class="card fade-in">
+          <div class="exercise-header">
+            <span class="muted t-mono">${exIdx + 1} / ${items.length}</span>
+            <div class="progress"><div class="bar"><span style="width:${((exIdx + 1) / items.length) * 100}%"></span></div></div>
+            <span class="badge" style="background:var(--c-primary-l);color:var(--c-primary-d);padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:600">${MODULE_LABELS[it.module] || it.module}</span>
+          </div>
+          <div class="exercise-q t-cn">${App.escapeHtml(it.prompt_zh)}</div>
+          <div class="exercise-q-th">${App.escapeHtml(it.prompt_th || "")}</div>
+          <div class="exercise-input">
+            <textarea id="input" placeholder="พิมพ์คำตอบภาษาจีนที่นี่... 在这里输入你的答案" rows="3"></textarea>
+            <div class="exercise-input-row">
+              <button class="btn btn-secondary" id="btn-exmic">🎤 พูด 语音</button>
+              <button class="btn btn-primary" id="btn-submit">ส่ง 提交</button>
+            </div>
+          </div>
+          <div id="feedback"></div>
+        </div>`;
+      document.getElementById("btn-exmic").onclick = () => exMic(el);
+      document.getElementById("btn-submit").onclick = () => submitExercise(it, el);
+    }
+
+    function exMic(el) {
+      if (!App.speechSupported()) { alert("อุปกรณ์นี้ไม่รองรับการพูด (此设备不支持语音识别)"); return; }
+      const btn = document.getElementById("btn-exmic");
+      btn.textContent = "⏺ กำลังฟัง... (正在听...)";
+      App.speech("zh-CN",
+        (final) => { const ta = document.getElementById("input"); ta.value += (ta.value ? "" : "") + final; btn.textContent = "🎤 พูด 语音"; },
+        (interim) => { document.getElementById("input").placeholder = interim || "พิมพ์คำตอบภาษาจีนที่นี่..."; },
+        () => { btn.textContent = "🎤 พูด 语音"; });
+    }
+
+    async function submitExercise(it, el) {
+      if (exBusy) return;
+      const input = document.getElementById("input").value.trim();
+      if (!input) { alert("กรุณาพิมพ์คำตอบ (请输入答案)"); return; }
+      exBusy = true;
+      const btn = document.getElementById("btn-submit");
+      btn.disabled = true; btn.textContent = "🤔 ครู AI กำลังดู...";
+      const fb = document.getElementById("feedback");
+      fb.innerHTML = '<div class="loading-pulse"><div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div><span>AI 思考中...</span></div>';
+      try {
+        const r = await App.call("/api/feedback", { method: "POST", body: JSON.stringify({ module: it.module, item_id: it.id, input_text: input }) });
+        const verdictMap = { correct: ["✅ เยี่ยมมาก!", "correct"], partial: ["💡 เกือบถูกแล้ว!", "partial"], incorrect: ["💡 ลองใหม่อีกครั้ง", "incorrect"] };
+        const [badgeText, cls] = verdictMap[r.verdict] || ["", ""];
+        fb.innerHTML = `
+          <div class="feedback-box ${cls} fade-in">
+            <div class="verdict-badge ${cls}">${badgeText}</div>
+            <div>${App.escapeHtml(r.feedback_th || "")}</div>
+            ${r.example_zh ? `<span class="zh">📄 ${App.escapeHtml(r.example_zh)}</span>` : ""}
+          </div>
+          <div class="hint-row">
+            ${r.hint1_th ? '<button class="hint-pill" data-h="1">💡 คำใบ้ที่ 1</button>' : ""}
+            ${r.hint2_th ? '<button class="hint-pill" data-h="2">💡💡 คำใบ้ที่ 2</button>' : ""}
+            ${r.example_zh ? '<button class="hint-pill" data-h="3">📖 ตัวอย่าง</button>' : ""}
+            ${r.answer_zh ? '<button class="hint-pill" data-h="4">✅ เฉลย</button>' : ""}
+          </div>
+          <div id="reveals"></div>
+          ${it.explanation_th ? `<div class="explain-box"><b>ทำไมถึงเป็นแบบนี้ · 为什么这么答</b><br>${App.escapeHtml(it.explanation_th)}</div>` : ""}
+          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top: var(--s-5)">${exIdx === items.length - 1 ? "🎉 จบแล้ว 完成！" : "ข้อถัดไป 下一题 →"}</button>`;
+        document.getElementById("btn-next").onclick = () => {
+          exIdx = exIdx === items.length - 1 ? 0 : exIdx + 1;
+          renderModule("exercise"); window.scrollTo({top:0,behavior:'smooth'});
+        };
+        const HINTS = { 1: r.hint1_th, 2: r.hint2_th, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
+        fb.querySelectorAll("[data-h]").forEach(b => {
+          b.onclick = async () => {
+            const lv = parseInt(b.dataset.h);
+            b.disabled = true;
+            const div = document.createElement("div");
+            div.className = "revealed-hint";
+            div.innerHTML = "<b>提示</b> " + App.escapeHtml(HINTS[lv] || "");
+            document.getElementById("reveals").appendChild(div);
+            App.call("/api/hint", { method: "POST", body: JSON.stringify({ module: it.module, item_id: it.id, hint_level: lv }) }).catch(() => {});
+          };
+        });
+      } catch (e) {
+        fb.innerHTML = '<div class="feedback-box error-text">出错了，请重试</div>';
+      } finally {
+        exBusy = false;
+        btn.disabled = false; btn.textContent = "ส่ง 提交";
+      }
+    }
+
+    /* ===== 发音 ===== */
+    function renderPronounce(el) {
+      let targets = [];
+      if (DATA.text && DATA.text.body_zh) {
+        targets = DATA.text.body_zh.match(/[^。！？\n]+[。！？]?/g) || [];
+      }
+      if (!targets.length) targets = (DATA.vocab || []).map(v => v.word);
+      if (!targets.length) { el.innerHTML = '<div class="card muted" style="text-align:center">ยังไม่มีประโยคให้ฝึก</div>'; return; }
+      el.innerHTML = `
+        <div class="card fade-in" style="margin-bottom: var(--s-4)">
+          <h2 style="margin-bottom: var(--s-2)">🗣️ ฝึกออกเสียง · 发音</h2>
+          <p class="muted">点句子听录音，然后跟读，AI 评价你的发音</p>
+        </div>` + targets.map((s, i) => `
+          <div class="card fade-in" style="padding: var(--s-4)">
+            <div style="display:flex;align-items:center;gap: var(--s-3);margin-bottom: var(--s-3)">
+              <span class="muted t-mono">${i + 1}</span>
+              <div style="flex:1" class="t-cn">${App.escapeHtml(s.trim())}</div>
+            </div>
+            <button class="btn btn-primary btn-block btn-lg" data-p="${i}">🎤 跟读</button>
+            <div id="pr-${i}"></div>
+          </div>`).join("");
+      el.querySelectorAll("[data-p]").forEach(b => b.onclick = () => pronounceOne(el, targets, parseInt(b.dataset.p), b));
+    }
+
+    async function pronounceOne(el, targets, i, btn) {
+      if (!App.speechSupported()) { alert("此设备不支持语音识别"); return; }
+      const box = document.getElementById("pr-" + i);
+      const target = targets[i];
+      btn.textContent = "⏺ กำลังฟัง..."; btn.disabled = true;
+      box.innerHTML = '<div class="loading-pulse"><div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>请朗读...</div>';
+      App.speech("zh-CN",
+        async (final) => {
+          btn.textContent = "🎤 跟读"; btn.disabled = false;
+          box.innerHTML = `<div class="feedback-box"><b>识别到：</b> ${App.escapeHtml(final)}</div><div class="explain-box">AI 评价中...</div>`;
+          try {
+            const r = await App.call("/api/pronounce", { method: "POST", body: JSON.stringify({ target_text: target, recognized_text: final }) });
+            box.innerHTML = `<div class="feedback-box"><b>识别到：</b> ${App.escapeHtml(r.recognized || final)}</div><div class="explain-box">${App.escapeHtml(r.feedback)}</div>`;
+          } catch (e) {
+            box.innerHTML = '<div class="feedback-box error-text">出错了，请重试</div>';
+          }
+        },
+        (interim) => { box.innerHTML = `<p class="muted">${App.escapeHtml(interim || "")}</p>`; },
+        () => { btn.textContent = "🎤 跟读"; btn.disabled = false; });
+    }
+
+    /* ===== 考试 ===== */
+    function renderExam(el) {
+      const qs = DATA.exam;
+      if (!qs.length) { el.innerHTML = '<div class="card muted" style="text-align:center">ยังไม่มีข้อสอบ</div>'; return; }
+      el.innerHTML = `
+        <div class="exercise-header">
+          <span class="muted t-mono">${qs.length} ข้อ</span>
+          <div class="progress"><div class="bar"><span id="exam-bar" style="width:0%"></span></div></div>
+          <span class="muted t-mono" id="exam-done">0 / ${qs.length}</span>
+        </div>` + qs.map((q, i) => `
+          <div class="card exam-card fade-in" data-qi="${q.id}">
+            <div class="exam-q-meta">
+              <span class="num">${i + 1}</span>
+              <span class="t-mono" style="margin-left: auto">ข้อ ${i + 1}</span>
+            </div>
+            <div class="exam-q-text t-cn">${App.escapeHtml(q.question_zh)}</div>
+            <div class="exam-q-th">${App.escapeHtml(q.question_th || "")}</div>
+            <div class="exam-options">
+              ${["A", "B", "C", "D"].map(l => `
+                <button class="exam-opt" data-q="${q.id}" data-opt="${l}">
+                  <span class="letter">${l}</span>
+                  <span class="t-cn">${App.escapeHtml(q["option_" + l.toLowerCase()] || "")}</span>
+                </button>`).join("")}
+            </div>
+            <div id="eq-${q.id}"></div>
+          </div>`).join("") +
+        '<button class="btn btn-primary btn-block btn-xl fade-in" id="btn-exam" style="margin-top: var(--s-4)">🎯 ส่งข้อสอบ · 交卷</button><div id="exam-result"></div>';
+      el.querySelectorAll(".exam-opt").forEach(b => {
+        b.onclick = () => {
+          const qid = b.dataset.q;
+          el.querySelectorAll(`.exam-opt[data-q="${qid}"]`).forEach(x => x.classList.remove("selected"));
+          b.classList.add("selected");
+          updateExamProgress();
+        };
+      });
+      document.getElementById("btn-exam").onclick = async () => {
+        const answers = [];
+        el.querySelectorAll(".exam-opt.selected").forEach(b => answers.push({ exam_id: parseInt(b.dataset.q), chosen: b.dataset.opt }));
+        if (!answers.length) { alert("กรุณาเลือกคำตอบอย่างน้อย 1 ข้อ (请至少选 1 题)"); return; }
+        const btn = document.getElementById("btn-exam");
+        btn.disabled = true; btn.textContent = "📊 กำลังตรวจ... 判分中...";
+        try {
+          const r = await App.call("/api/exam/submit", { method: "POST", body: JSON.stringify({ lesson_no: LESSON, answers }) });
+          document.getElementById("exam-result").innerHTML = `
+            <div class="card fade-in" style="background:linear-gradient(135deg,var(--c-primary-l),#e9f7ee);border:2px solid var(--c-primary);text-align:center;padding: var(--s-6)">
+              <div style="font-size:2.5rem;font-weight:800;color:var(--c-primary-d)">${r.score}/100</div>
+              <div style="color:var(--c-text-2);margin-top: var(--s-2)">ถูก ${r.correct} / ${r.total} 题</div>
+            </div>` + r.results.map((res, i) => `
+            <div class="card ${res.is_correct ? '' : 'wrong'} fade-in" style="margin-top: var(--s-3)">
+              <div class="exam-q-meta">
+                <span class="num">${i + 1}</span>
+                <span style="color:${res.is_correct ? 'var(--c-primary-d)' : 'var(--c-danger)'};font-weight:600">
+                  ${res.is_correct ? '✅ ถูก' : '❌ ผิด'} · คุณตอบ ${res.chosen || '-'} · เฉลย ${res.correct_letter}
+                </span>
+              </div>
+              <div class="exam-q-text t-cn">${App.escapeHtml(res.question_zh)}</div>
+              ${res.explanation_th ? `<div class="explain-box">${App.escapeHtml(res.explanation_th)}</div>` : ""}
+            </div>`).join("");
+          btn.style.display = "none";
+          window.scrollTo({top: document.getElementById("exam-result").offsetTop - 80, behavior: "smooth"});
+        } catch (e) { alert("交卷失败"); btn.disabled = false; btn.textContent = "🎯 ส่งข้อสอบ 交卷"; }
+      };
+    }
+
+    function updateExamProgress() {
+      const cards = document.querySelectorAll("[data-qi]");
+      const done = document.querySelectorAll(".exam-opt.selected").length;
+      const total = cards.length;
+      const pct = total ? (done / total) * 100 : 0;
+      const bar = document.getElementById("exam-bar");
+      const dn = document.getElementById("exam-done");
+      if (bar) bar.style.width = pct + "%";
+      if (dn) dn.textContent = `${done} / ${total}`;
+    }
+  </script>
+</body>
+</html>

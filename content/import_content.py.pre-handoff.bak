@@ -1,0 +1,72 @@
+# -*- coding: utf-8 -*-
+"""把 content 下的 *_M41 等新内容 CSV 导入 content.db。
+用法: python import_content.py            # 导入全部存在的
+      python import_content.py vocab      # 只导某类（vocab/texts/grammar/exams/expl）"""
+import csv, glob, os, sqlite3, sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+CONTENT_DIR = r"C:\dev\liff-app\content"
+DB = os.path.join(CONTENT_DIR, "content.db")
+conn = sqlite3.connect(DB)
+
+# 类别 -> (文件 glob, 表名, 字段)
+KINDS = {
+    "vocab":    ("vocab_*.csv",    "vocab",          ["book","lesson_no","word","pinyin","meaning_th","example_zh"]),
+    "texts":    ("texts_*.csv",    "texts",          ["book","lesson_no","title","body_zh","body_th"]),
+    "grammar":  ("grammar_*.csv",  "grammar_points", ["book","lesson_no","point","explanation_th","example_zh","example_th"]),
+    "exams":    ("exams_*.csv",    "exams",          ["book","lesson_no","question_zh","question_th","option_a","option_b","option_c","option_d","correct","explanation_th"]),
+}
+
+
+def import_csv(table, fields, path):
+    book = os.path.basename(path).split("_")[1].split(".")[0]
+    # 幂等：先删该书旧数据再插入
+    conn.execute(f"DELETE FROM {table} WHERE book=?", (book,))
+    n = 0
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            vals = [book if i == 0 else ((row.get(f) or "").strip()) for i, f in enumerate(fields)]
+            conn.execute(
+                f"INSERT INTO {table}({','.join(fields)}) VALUES({','.join('?'*len(fields))})", vals
+            )
+            n += 1
+    conn.commit()
+    print(f"  [{book}] {table}: +{n}")
+    return n
+
+
+def import_expl(path):
+    """练习讲解：按 items.id 更新 explanation_th"""
+    book = os.path.basename(path).split("_")[1].split(".")[0]
+    n = 0
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            iid = row.get("id")
+            if not iid:
+                continue
+            cur = conn.execute("UPDATE items SET explanation_th=? WHERE id=?", (row.get("explanation_th",""), int(iid)))
+            n += cur.rowcount
+    conn.commit()
+    print(f"  [{book}] items.explanation_th updated: {n}")
+    return n
+
+
+def main():
+    only = sys.argv[1] if len(sys.argv) > 1 else None
+    total = 0
+    for kind, (glob_pat, table, fields) in KINDS.items():
+        if only and only.lower() != kind:
+            continue
+        for f in sorted(glob.glob(os.path.join(CONTENT_DIR, glob_pat))):
+            total += import_csv(table, fields, f)
+    if only and only.lower() == "expl":
+        for f in sorted(glob.glob(os.path.join(CONTENT_DIR, "expl_*.csv"))):
+            total += import_expl(f)
+    elif only is None:
+        for f in sorted(glob.glob(os.path.join(CONTENT_DIR, "expl_*.csv"))):
+            total += import_expl(f)
+    print(f"TOTAL inserted: {total}")
+
+
+if __name__ == "__main__":
+    main()

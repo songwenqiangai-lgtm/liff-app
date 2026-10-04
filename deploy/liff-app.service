@@ -1,0 +1,21 @@
+[Unit]
+Description=Thai-Chinese Tutor LIFF backend (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+# 用 www-data 非 root 运行，降低权限
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/liff-app/backend
+# main.py 会自动 load_dotenv 读取同目录 .env；这里再显式 Inject 一份最稳妥
+EnvironmentFile=/opt/liff-app/backend/.env
+ExecStart=/opt/liff-app/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+# 日志
+StandardOutput=append:/opt/liff-app/backend/uvicorn.log
+StandardError=append:/opt/liff-app/backend/uvicorn.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+# 环境/密钥/运行时文件 —— 严禁提交
+.env
+*.env.local
+
+# 运行时 SQLite（学生/日志/阶段等动态数据）不提交
+backend/app.db
+backend/app.db-shm
+backend/app.db-wal
+
+# 配音音频（97MB，暂不进仓库；部署后另行上传）
+backend/audio/
+backend/uploads/
+
+# 内容库 content.db 是静态内容（课文/生词/语法/考试），需部署到服务器 → 提交
+!content/content.db
+# 其余 content/ 下的都是开发产物（OCR文字稿/CSV导出/审校表/工具脚本），部署不需要
+content/ocr/
+content/*.csv
+content/*.xlsx
+content/*.py
+content/tmp/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+server.log
+.venv/
+venv/
