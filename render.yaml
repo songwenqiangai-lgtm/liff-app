@@ -6,7 +6,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r backend/requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn --app-dir backend main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: LLM_BASE_URL
         value: https://api.deepseek.com/v1

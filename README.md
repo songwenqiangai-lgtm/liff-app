@@ -74,9 +74,9 @@ ngrok http 8000
 1. 把整个 liff-app 文件夹推到 GitHub 私有仓库
 2. Render.com -> New Web Service -> 选仓库
    - Build Command: `pip install -r backend/requirements.txt`
-   - Start Command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+   - Start Command: `uvicorn --app-dir backend main:app --host 0.0.0.0 --port $PORT`
 3. Environment 里填 .env 的全部变量
-4. 部署完成后的 https://xxxx.onrender.com 填回 LIFF 后台 Endpoint URL
+4. 部署完成后用 https://xxxx.onrender.com 访问（学生端在根路径，教师端在 /teacher/）
 5. 注意：Render 免费档会休眠，正式实验前一周升级到付费档（约$7/月），或用 Railway
 
 ## 阶段开关逻辑（研究保真度）
