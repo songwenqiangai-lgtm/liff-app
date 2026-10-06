@@ -59,7 +59,7 @@ def parse_json(text: str) -> dict:
         return out
 
 
-async def chat_json(messages: list, temperature: float = 0.3, timeout: float = 60, provider=None) -> dict:
+async def chat_json(messages: list, temperature: float = 0.3, timeout: float = 90, provider=None) -> dict:
     """调用 LLM 并强制解析为 JSON。未配置 key 或出错时返回错误占位（不中断学生端）。
     provider: None=DeepSeek(默认) / "mm"=MiniMax(中文内容)"""
     base_url, api_key, model = provider_conf(provider)
@@ -104,7 +104,7 @@ async def chat_json(messages: list, temperature: float = 0.3, timeout: float = 6
     return parse_json(text)
 
 
-async def chat_text(messages: list, temperature: float = 0.5, timeout: float = 60, provider=None) -> str:
+async def chat_text(messages: list, temperature: float = 0.5, timeout: float = 90, provider=None) -> str:
     """调用 LLM 返回纯文本回答。未配置 key 或出错时返回泰语错误提示。
     provider: None=DeepSeek(默认) / "mm"=MiniMax(中文内容)"""
     base_url, api_key, model = provider_conf(provider)

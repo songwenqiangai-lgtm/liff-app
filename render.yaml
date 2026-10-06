@@ -9,17 +9,17 @@ services:
     startCommand: uvicorn --app-dir backend main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: LLM_BASE_URL
-        value: https://api.deepseek.com/v1
+        value: https://ark.cn-beijing.volces.com/api/plan/v3
       - key: LLM_MODEL
-        value: deepseek-chat
+        value: deepseek-v4-flash
       - key: LLM_API_KEY
-        sync: false   # 在 Render 后台填入你的 DeepSeek key
+        sync: false   # 在 Render 后台填入火山方舟 Agent Plan 专属 Key（ark- 开头）
       - key: LLM_BASE_URL_MM
-        value: https://api.minimaxi.com/v1
+        value: https://ark.cn-beijing.volces.com/api/plan/v3
       - key: LLM_MODEL_MM
-        value: MiniMax-M2.7
+        value: deepseek-v4-flash
       - key: LLM_API_KEY_MM
-        sync: false   # 在 Render 后台填入你的 MiniMax key
+        sync: false   # 同上，Agent Plan 是同一个 Key
       - key: SESSION_SECRET
         sync: false   # 会话签名密钥
       - key: TEACHER_PASSWORD
