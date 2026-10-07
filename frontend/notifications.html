@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>แจ้งเตือน · 通知</title>
+  <link rel="stylesheet" href="/assets/style.css?v=7">
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=7"></script>
+  <script>
+    let DATA = null;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      try { DATA = await App.call("/api/notifications"); }
+      catch (e) {
+        document.getElementById("app").innerHTML = '<div class="app-wrap"><div class="card">โหลดไม่สำเร็จ · 加载失败</div></div>';
+        return;
+      }
+      render();
+    })();
+
+    function render() {
+      const app = document.getElementById("app");
+      const list = DATA.notifications || [];
+      const labels = DATA.kind_labels || {};
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← หน้าหลัก</a>
+          <h1>🔔 แจ้งเตือน · 通知</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+          ${list.length ? list.map(n => `
+            <div class="notif-item ${n.read ? "" : "unread"}" data-id="${n.id}">
+              <div class="n-kind">${App.escapeHtml(labels[n.kind] || n.kind || "")}</div>
+              <div class="n-title">${App.escapeHtml(n.title || "")}</div>
+              ${n.body ? `<div class="n-body">${App.escapeHtml(n.body)}</div>` : ""}
+              <div class="n-time">${App.escapeHtml(n.created_at || "")}</div>
+            </div>`).join("")
+            : '<div class="card muted" style="text-align:center">ยังไม่มีการแจ้งเตือน<br>暂无通知</div>'}
+        </div>`;
+
+      app.querySelectorAll(".notif-item.unread").forEach(el => {
+        el.onclick = async () => {
+          const id = el.dataset.id;
+          el.classList.remove("unread");
+          try { await App.call(`/api/notifications/${id}/read`, { method: "POST" }); } catch (e) {}
+        };
+      });
+    }
+  </script>
+</body>
+</html>

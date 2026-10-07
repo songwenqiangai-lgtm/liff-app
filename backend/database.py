@@ -107,6 +107,56 @@ CREATE TABLE IF NOT EXISTS class_lessons(
   class_id TEXT, book TEXT, lesson_no TEXT,
   PRIMARY KEY(class_id, book, lesson_no)
 );
+
+-- ============ 功能增强表（F1–F12） ============
+-- F1 学生周报缓存：同一学生同一周唯一，懒生成时 INSERT OR IGNORE
+CREATE TABLE IF NOT EXISTS weekly_reports(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL, week_start TEXT NOT NULL,
+  metrics_json TEXT, generated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(student_id, week_start)
+);
+-- F2 薄弱点诊断快照
+CREATE TABLE IF NOT EXISTS diagnostics(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER, phase TEXT,
+  weak_points_json TEXT, generated_at TEXT DEFAULT (datetime('now'))
+);
+-- F3 个性化学习建议（记录是否被点击，用于能动性证据）
+CREATE TABLE IF NOT EXISTS suggestions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER, suggestion_text TEXT, related_weak_points TEXT,
+  related_lesson_id TEXT, action_href TEXT,
+  created_at TEXT DEFAULT (datetime('now')), clicked_at TEXT
+);
+-- F4 反馈采纳理由（H3 能动性中介的行为证据）
+CREATE TABLE IF NOT EXISTS decision_reasons(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  feedback_event_id INTEGER, student_id INTEGER,
+  reason_type TEXT, reason_text TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- 站内通知中心（学生/教师共用）
+CREATE TABLE IF NOT EXISTS notifications(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_type TEXT NOT NULL, user_id TEXT NOT NULL,
+  kind TEXT, title TEXT, body TEXT,
+  read INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- F10 无 AI 迁移任务（线下任务成绩，task_source 固定 offline）
+CREATE TABLE IF NOT EXISTS task_offline(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER, phase TEXT, task_type TEXT,
+  score REAL, submitted_at TEXT DEFAULT (datetime('now')),
+  task_source TEXT DEFAULT 'offline'
+);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_student ON weekly_reports(student_id);
+CREATE INDEX IF NOT EXISTS idx_diag_student ON diagnostics(student_id);
+CREATE INDEX IF NOT EXISTS idx_sugg_student ON suggestions(student_id);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_type, user_id, read);
+CREATE INDEX IF NOT EXISTS idx_offline_student ON task_offline(student_id);
 CREATE INDEX IF NOT EXISTS idx_hint_student ON hint_events(student_id);
 CREATE INDEX IF NOT EXISTS idx_fb_student ON feedback_events(student_id);
 CREATE INDEX IF NOT EXISTS idx_avoid_student ON avoidance_flags(student_id);
@@ -150,6 +200,10 @@ def _migrate(conn):
     add_col("phase_config", "start_time", "TEXT")
     add_col("phase_config", "end_time", "TEXT")
     add_col("logs", "detail", "TEXT")
+    # 功能增强：区分 AI 参与 vs 线下任务、关联决策理由、区分自动触发
+    add_col("assessments", "task_source", "TEXT DEFAULT 'ai'")
+    add_col("feedback_events", "decision_reason_id", "INTEGER")
+    add_col("handoff_events", "auto_triggered", "INTEGER DEFAULT 0")
     conn.commit()
 
 

@@ -27,3 +27,6 @@ __pycache__/
 server.log
 .venv/
 venv/
+
+# 编辑器/开发工具本地配置
+.claude/

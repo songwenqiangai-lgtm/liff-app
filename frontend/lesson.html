@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>บทเรียน · 课程</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <link rel="stylesheet" href="/assets/style.css?v=4">
+  <link rel="stylesheet" href="/assets/style.css?v=7">
   <style>
     /* 课文每句布局 */
     .sent-line { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0;
@@ -35,7 +35,7 @@
     <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     <div>กำลังโหลด... 正在加载</div>
   </div>
-  <script src="/assets/app.js?v=6"></script>
+  <script src="/assets/app.js?v=7"></script>
   <script>
     const LESSON = new URLSearchParams(location.search).get("lesson") || "1";
     const MODULE = new URLSearchParams(location.search).get("module") || "";
@@ -273,6 +273,14 @@
           </div>
           <div id="reveals"></div>
           ${it.explanation_th ? `<div class="explain-box"><b>ทำไมถึงเป็นแบบนี้ · 为什么这么答</b><br>${App.escapeHtml(it.explanation_th)}</div>` : ""}
+          <div class="decision-row" id="decision-box">
+            <div class="d-q">ครู AI พูดถูกไหม · AI 说得对吗？</div>
+            <div class="decision-opts">
+              <button data-r="agree">👍 เห็นด้วย 同意</button>
+              <button data-r="disagree">👎 ไม่เห็นด้วย 不同意</button>
+              <button data-r="not_sure">🤔 ไม่แน่ใจ 不确定</button>
+            </div>
+          </div>
           <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top: var(--s-5)">${exIdx === items.length - 1 ? "🎉 จบแล้ว 完成！" : "ข้อถัดไป 下一题 →"}</button>`;
         document.getElementById("btn-next").onclick = () => {
           exIdx = exIdx === items.length - 1 ? 0 : exIdx + 1;
@@ -288,6 +296,28 @@
             div.innerHTML = "<b>提示</b> " + App.escapeHtml(HINTS[lv] || "");
             document.getElementById("reveals").appendChild(div);
             App.call("/api/hint", { method: "POST", body: JSON.stringify({ module: it.module, item_id: it.id, hint_level: lv }) }).catch(() => {});
+          };
+        });
+        // F4：反馈采纳理由（H3 能动性中介的行为证据）
+        fb.querySelectorAll("#decision-box [data-r]").forEach(b => {
+          b.onclick = async () => {
+            const box = document.getElementById("decision-box");
+            const kind = b.dataset.r;
+            let text = "";
+            if (kind === "disagree") {
+              text = (prompt("可以说说你为什么不同意吗？（可留空）\nบอกเหตุผลที่เห็นต่างได้ไหม") || "").trim();
+            }
+            box.querySelectorAll("[data-r]").forEach(x => { x.disabled = true; });
+            b.classList.add("chosen");
+            const note = { agree: "你同意 AI 的反馈", disagree: "你不同意 AI 的反馈", not_sure: "你还不确定" }[kind] || "";
+            try {
+              await App.call("/api/feedback/reason", {
+                method: "POST",
+                body: JSON.stringify({ reason_type: kind, reason_text: text, item_id: it.id }),
+              });
+            } catch (e) { /* 记录失败不影响继续做题 */ }
+            box.insertAdjacentHTML("beforeend",
+              `<div class="decision-done" style="margin-top:8px">✅ 已记录：${App.escapeHtml(note)}</div>`);
           };
         });
       } catch (e) {

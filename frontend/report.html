@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>รายงานของฉัน · 我的报告</title>
+  <link rel="stylesheet" href="/assets/style.css?v=7">
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=7"></script>
+  <script>
+    let RPT = null, DIAG = null, SUGG = null, RADAR = null;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      const app = document.getElementById("app");
+      try {
+        const [r, d, s, rad] = await Promise.all([
+          App.call("/api/weekly_report"),
+          App.call("/api/diagnostics"),
+          App.call("/api/suggestions"),
+          App.call("/api/radar"),
+        ]);
+        RPT = r; DIAG = d; SUGG = s; RADAR = rad;
+      } catch (e) {
+        app.innerHTML = '<div class="app-wrap"><div class="card">โหลดไม่สำเร็จ · 加载失败</div></div>';
+        return;
+      }
+      render();
+    })();
+
+    function deltaHtml(v, unit) {
+      if (v === null || v === undefined || v === 0) return "";
+      const cls = v > 0 ? "delta-up" : "delta-down";
+      const sign = v > 0 ? "▲ +" : "▼ ";
+      return `<span class="${cls}">${sign}${v}${unit || ""}</span>`;
+    }
+
+    function radarSvg(dims) {
+      const size = 300, cx = 150, cy = 150, R = 96;
+      const n = dims.length;
+      const ang = i => -Math.PI / 2 + i * 2 * Math.PI / n;
+      const pt = (i, r) => [cx + r * Math.cos(ang(i)), cy + r * Math.sin(ang(i))];
+      let rings = "";
+      for (const f of [0.25, 0.5, 0.75, 1]) {
+        const pts = dims.map((_, i) => pt(i, R * f).join(",")).join(" ");
+        rings += `<polygon points="${pts}" fill="none" stroke="#e6f0eb" stroke-width="1"/>`;
+      }
+      const axes = dims.map((_, i) => {
+        const [x, y] = pt(i, R);
+        return `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#e6f0eb"/>`;
+      }).join("");
+      const dataPts = dims.map((d, i) => pt(i, R * ((d.value == null ? 0 : d.value) / 100)).join(",")).join(" ");
+      const labels = dims.map((d, i) => {
+        const [x, y] = pt(i, R + 24);
+        const txt = String(d.label || "").split(" · ")[0];
+        return `<text x="${x}" y="${y}" font-size="11" fill="#415c52" text-anchor="middle" dominant-baseline="middle">${App.escapeHtml(txt)}</text>`;
+      }).join("");
+      return `<svg viewBox="0 0 ${size} ${size}">${rings}${axes}
+        <polygon points="${dataPts}" fill="rgba(31,138,95,.25)" stroke="#1f8a5f" stroke-width="2"/>
+        ${labels}</svg>`;
+    }
+
+    function render() {
+      const app = document.getElementById("app");
+      const m = RPT || {};
+      const dl = m.delta || {};
+      const acc = m.accuracy == null ? "—" : m.accuracy + "%";
+      const wp = (DIAG && DIAG.weak_points) || [];
+      const sg = (SUGG && SUGG.suggestions) || [];
+      const dims = (RADAR && RADAR.dimensions) || [];
+
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← หน้าหลัก</a>
+          <h1>📈 รายงานของฉัน · 我的报告</h1>
+          <a class="bell" href="notifications.html">🔔</a>
+        </div>
+        <div class="app-wrap fade-in">
+
+          <div class="report-hero">
+            <div class="rh-lbl">สัปดาห์นี้ · 本周正确率</div>
+            <div class="rh-big">${acc}</div>
+            <div class="rh-lbl">${m.week_start || ""} ~ ${m.week_end || ""}</div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">📊 สรุปสัปดาห์นี้ · 本周概览</h2>
+            <div class="metric-row">
+              <span class="m-name">提交练习 · แบบฝึกหัดที่ส่ง</span>
+              <span class="m-val">${m.submissions || 0}${deltaHtml(dl.submissions)}</span>
+            </div>
+            <div class="metric-row">
+              <span class="m-name">正确率 · ความแม่นยำ</span>
+              <span class="m-val">${acc}${deltaHtml(dl.accuracy, "%")}</span>
+            </div>
+            <div class="metric-row">
+              <span class="m-name">使用提示 · การใช้คำใบ้</span>
+              <span class="m-val">${m.hint_requests || 0}${deltaHtml(dl.hint_requests)}</span>
+            </div>
+            <div class="metric-row">
+              <span class="m-name">学习天数 · วันที่เข้าเรียน</span>
+              <span class="m-val">${m.active_days || 0}</span>
+            </div>
+            <div class="metric-row">
+              <span class="m-name">提示依赖度 · 每次提交用几次提示</span>
+              <span class="m-val">${m.hint_per_submit == null ? "—" : m.hint_per_submit}</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">🕸️ ความสามารถ · 能力分布</h2>
+            <div class="radar-wrap">${dims.length ? radarSvg(dims) : '<p class="muted">ยังไม่มีข้อมูล · 暂无数据</p>'}</div>
+            <div class="radar-legend">
+              ${dims.map(d => `<span>${App.escapeHtml(String(d.label).split(" · ")[0])} <b>${d.value == null ? "—" : d.value}</b></span>`).join("")}
+            </div>
+            <p class="muted" style="font-size:.75rem;text-align:center;margin-top:var(--s-3)">
+              ${App.escapeHtml((RADAR && RADAR.note) || "")}
+            </p>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">🎯 จุดอ่อน · 薄弱点 TOP${wp.length || 0}</h2>
+            ${wp.length ? wp.map((p, i) => `
+              <div class="weak-item">
+                <div class="w-rank">${i + 1}</div>
+                <div class="w-main">
+                  <div class="w-point">${App.escapeHtml(p.point || "")}</div>
+                  <div class="w-module">${App.escapeHtml(p.module_label || p.module || "")}${p.lesson ? " · 第" + App.escapeHtml(String(p.lesson)) + "课" : ""}</div>
+                </div>
+                <div class="w-count">×${p.count}</div>
+              </div>`).join("")
+              : '<p class="muted">ยังไม่พบจุดอ่อนที่ชัดเจน ทำแบบฝึกหัดต่อนะ · 暂未发现明显薄弱点，继续练习吧</p>'}
+          </div>
+
+          <div class="card" style="background:transparent;box-shadow:none;padding:0">
+            <h2 style="margin:var(--s-4) 0 var(--s-3)">💡 คำแนะนำ · 学习建议</h2>
+            ${sg.map(s => {
+              let txt = { zh: "", th: "" };
+              try { txt = JSON.parse(s.suggestion_text); } catch (e) { txt.zh = s.suggestion_text || ""; }
+              const href = s.action_href || "#";
+              const done = !!s.clicked_at;
+              return `<a class="sugg-card ${done ? "done" : ""}" href="${App.escapeHtml(href)}" data-sid="${s.id}">
+                <div class="s-zh">${App.escapeHtml(txt.zh || "")}</div>
+                ${txt.th ? `<div class="s-th">${App.escapeHtml(txt.th)}</div>` : ""}
+                ${href !== "#" ? '<div class="s-go">ไปฝึกเลย → 去练习</div>' : ""}
+              </a>`;
+            }).join("")}
+          </div>
+
+        </div>`;
+
+      app.querySelectorAll(".sugg-card").forEach(a => {
+        a.onclick = () => {
+          const sid = a.dataset.sid;
+          if (sid) App.call(`/api/suggestions/${sid}/click`, { method: "POST" }).catch(() => {});
+        };
+      });
+    }
+  </script>
+</body>
+</html>

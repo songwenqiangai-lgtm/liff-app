@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>หน้าหลัก · 中文小老师</title>
-  <link rel="stylesheet" href="/assets/style.css?v=5">
+  <link rel="stylesheet" href="/assets/style.css?v=7">
   <style>
     .home-hero { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-4) var(--s-3); }
     .home-hero img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); }
@@ -23,6 +23,7 @@
       font-size: 1.8rem; flex-shrink: 0; box-shadow: 0 4px 12px rgba(31,138,95,.25); }
     .entry-card.ask .ec-icon { background: linear-gradient(135deg, #2e6cb0, #1f4e8a); box-shadow: 0 4px 12px rgba(46,108,176,.25); }
     .entry-card.stats .ec-icon { background: linear-gradient(135deg, #d9902e, #b86d1d); box-shadow: 0 4px 12px rgba(217,144,46,.25); }
+    .entry-card.report .ec-icon { background: linear-gradient(135deg, #7b5cc4, #5a3f9e); box-shadow: 0 4px 12px rgba(123,92,196,.25); }
     .entry-card .ec-text { flex: 1; }
     .entry-card .ec-zh { font-weight: 700; font-size: 1.1rem; color: var(--c-text); font-family: "Noto Sans SC", sans-serif; }
     .entry-card .ec-th { color: var(--c-muted); font-size: .85rem; margin-top: 2px; }
@@ -39,6 +40,7 @@
         <div class="name" id="who">学生</div>
         <div class="role">สวัสดี · 欢迎回来</div>
       </div>
+      <a class="bell" href="notifications.html" style="margin-left:auto" title="通知">🔔<span class="dot-badge" id="bell-badge" style="display:none"></span></a>
       <button class="logout" id="btn-out">ออกจากระบบ 退出</button>
     </div>
 
@@ -69,6 +71,24 @@
         </div>
         <div class="ec-arrow">→</div>
       </a>
+
+      <a class="entry-card report" href="report.html">
+        <div class="ec-icon">📈</div>
+        <div class="ec-text">
+          <div class="ec-zh">我的报告</div>
+          <div class="ec-th">รายงานและจุดอ่อน · 周报 / 薄弱点 / 建议</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card" href="offline.html" id="offline-entry" style="display:none">
+        <div class="ec-icon">📝</div>
+        <div class="ec-text">
+          <div class="ec-zh">线下任务</div>
+          <div class="ec-th">งานฝึกไม่มี AI · 无 AI 测试周任务</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
     </div>
 
     <div class="home-mascot">
@@ -87,7 +107,7 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=6"></script>
+  <script src="/assets/app.js?v=7"></script>
   <script>
     if (!App.requireLogin()) {
       // 跳走
@@ -97,6 +117,18 @@
       document.getElementById("btn-out").onclick = () => {
         if (confirm("确认退出登录？· ยืนยันออกจากระบบ?")) App.logout();
       };
+      // 未读通知徽标（F6/F8/F12）
+      App.call("/api/notifications/unread_count").then(r => {
+        if (r && r.unread > 0) {
+          const b = document.getElementById("bell-badge");
+          b.textContent = r.unread > 99 ? "99+" : r.unread;
+          b.style.display = "flex";
+        }
+      }).catch(() => {});
+      // T1/T2 阶段才显示线下任务入口（F10）
+      App.call("/api/offline_task").then(r => {
+        if (r && r.active) document.getElementById("offline-entry").style.display = "flex";
+      }).catch(() => {});
     }
   </script>
 </body>

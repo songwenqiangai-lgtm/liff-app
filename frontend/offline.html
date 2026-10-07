@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>งานฝึกแบบไม่มี AI · 线下任务</title>
+  <link rel="stylesheet" href="/assets/style.css?v=7">
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <script src="/assets/app.js?v=7"></script>
+  <script>
+    let DATA = null;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      try { DATA = await App.call("/api/offline_task"); }
+      catch (e) {
+        document.getElementById("app").innerHTML = '<div class="app-wrap"><div class="card">โหลดไม่สำเร็จ · 加载失败</div></div>';
+        return;
+      }
+      render();
+    })();
+
+    function render() {
+      const app = document.getElementById("app");
+      const tasks = DATA.tasks || [];
+      const done = DATA.submitted || [];
+      const doneMap = {};
+      done.forEach(d => { if (!(d.task_type in doneMap)) doneMap[d.task_type] = d; });
+
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← หน้าหลัก</a>
+          <h1>📝 งานฝึก · 线下任务</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+          ${DATA.active ? `
+            <div class="offline-banner">
+              <b>ช่วงทดสอบแบบไม่มี AI · 本周为无 AI 测试周</b>
+              <div style="margin-top:6px;font-size:.88rem;line-height:1.7">
+                ช่วงนี้เป็นช่วงวัดผลโดยไม่ใช้ AI กรุณาทำงานต่อไปนี้กับครูผู้สอน<br>
+                本阶段不使用 AI，请按老师要求完成下列线下任务。
+              </div>
+            </div>` : `
+            <div class="card" style="text-align:center">
+              <div style="font-size:1.6rem">🙂</div>
+              <p class="muted" style="margin-top:var(--s-2)">
+                ตอนนี้ยังไม่มีงานฝึกแบบไม่มี AI<br>当前阶段没有线下任务
+              </p>
+            </div>`}
+
+          ${tasks.map(t => {
+            const d = doneMap[t.key];
+            return `<div class="offline-task">
+              <div class="ot-zh">${App.escapeHtml(t.zh || "")}</div>
+              <div class="ot-th">${App.escapeHtml(t.th || "")}</div>
+              ${d ? `<div class="ot-status">✅ ส่งแล้ว · 已提交 ${App.escapeHtml(String(d.score))} คะแนน (${App.escapeHtml(d.submitted_at || "")})</div>` : ""}
+            </div>`;
+          }).join("")}
+
+          <p class="muted" style="text-align:center;font-size:.8rem;margin-top:var(--s-4)">
+            ครูจะบันทึกคะแนนให้ · 成绩由老师录入
+          </p>
+        </div>`;
+    }
+  </script>
+</body>
+</html>

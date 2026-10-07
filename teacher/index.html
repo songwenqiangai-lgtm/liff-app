@@ -25,6 +25,12 @@
     .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
     .tag-open { background: #fbe3e0; color: #a33b2e; } .tag-closed { background: #dcf2e6; color: #14603f; }
     .badge { background: #c0392b; color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 0.75rem; }
+    .notif-row { padding: 10px 12px; border-bottom: 1px solid #e6f0eb; border-left: 4px solid transparent; }
+    .notif-row.unread { background: #ecf6f0; border-left-color: #1f8a5f; cursor: pointer; }
+    .notif-row .nr-kind { font-size: 0.72rem; color: #1f8a5f; font-weight: 700; letter-spacing: .05em; }
+    .notif-row .nr-title { font-weight: 700; margin-top: 2px; }
+    .notif-row .nr-body { font-size: 0.85rem; color: #415c52; margin-top: 2px; }
+    .notif-row .nr-time { font-size: 0.72rem; color: #6b8579; margin-top: 4px; }
     #login { max-width: 380px; margin: 80px auto; }
     .layout { display: flex; min-height: 100vh; }
     .sidenav { width: 170px; background: #22332c; color: #dfeae4; padding: 14px 8px; flex-shrink: 0; }
@@ -54,6 +60,8 @@
       <nav class="sidenav">
         <h3>🎓 研究数据平台</h3>
         <button class="nav-item active" data-view="overview">📊 班级总览</button>
+        <button class="nav-item" data-view="weekly">📈 班级周报</button>
+        <button class="nav-item" data-view="notifications">🔔 通知中心<span id="notif-badge"></span></button>
         <button class="nav-item" data-view="students">👤 学生行为</button>
         <button class="nav-item" data-view="handoffs">🔁 交接队列<span id="handoff-badge"></span></button>
         <button class="nav-item" data-view="handoff-new">➕ 交接补录</button>
@@ -112,6 +120,8 @@
         const d = await api("/teacher/overview");
         const b = document.getElementById("handoff-badge");
         b.innerHTML = d.open_handoffs_total ? `<span class="badge">${d.open_handoffs_total}</span>` : "";
+        const nb = document.getElementById("notif-badge");
+        if (nb) nb.innerHTML = d.unread_notifications ? `<span class="badge">${d.unread_notifications}</span>` : "";
       } catch (e) {}
     }
     function nav() {
@@ -123,7 +133,8 @@
     const VIEWS = { overview: viewOverview, students: viewStudents, handoffs: viewHandoffs,
       "handoff-new": viewHandoffNew, avoidance: viewAvoidance, inject: viewInject,
       fidelity: viewFidelity, phases: viewPhases, assign: viewAssign,
-      assessments: viewAssessments, export: viewExport };
+      assessments: viewAssessments, export: viewExport,
+      weekly: viewWeekly, notifications: viewNotifications };
     function go(v) { VIEWS[v] ? VIEWS[v]() : viewOverview(); }
 
     /* ---------- 1 班级总览 ---------- */
@@ -168,7 +179,12 @@
             <div class="stat"><div class="num">${d.followup_count}</div><div class="lbl">主动追问</div></div>
             <div class="stat"><div class="num">${d.adoption_rate == null ? "—" : d.adoption_rate + "%"}</div><div class="lbl">反馈采纳率</div></div>
           </div>
-          <div class="card"><h2>提示依赖分布</h2><table><tr><th>等级</th><th>次数</th></tr>${hintRows || "<tr><td>—</td><td>无</td></tr>"}</table></div>`;
+          <div class="card"><h2>提示依赖分布</h2><table><tr><th>等级</th><th>次数</th></tr>${hintRows || "<tr><td>—</td><td>无</td></tr>"}</table></div>
+          <div class="card"><h2>反馈决策理由</h2>
+            ${Object.keys(d.decisions || {}).length
+              ? `<table><tr><th>学生的选择</th><th>次数</th></tr>${Object.entries(d.decisions).map(([k, v]) => `<tr><td>${esc((d.decision_labels || {})[k] || k)}</td><td>${v}</td></tr>`).join("")}</table>`
+              : "<p class='muted'>该生尚未提交反馈决策理由</p>"}
+          </div>`;
       };
     }
 
@@ -373,7 +389,8 @@
       const testOpts = Object.entries(d.test_types).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
       const rows = d.assessments.map(a => `
         <tr><td>${esc(a.display_name)}</td><td>${esc(a.class_id)}</td><td>${esc(a.test_type)}</td>
-        <td>${esc(a.phase_or_wave)}</td><td>${a.score}</td><td>${a.rater_blind ? "盲评" : "—"}</td></tr>`).join("");
+        <td>${esc(a.phase_or_wave)}</td><td>${a.score}</td><td>${a.rater_blind ? "盲评" : "—"}</td>
+        <td>${a.task_source === "offline" ? "<span class='tag tag-closed'>无AI</span>" : "有AI"}</td></tr>`).join("");
       el.innerHTML = `
         <h1>📝 成绩与口语样本</h1>
         <div class="card"><h2>录入成绩</h2><div class="row">
@@ -381,6 +398,7 @@
           <select id="a-type">${testOpts}</select>
           <input id="a-wave" placeholder="阶段/轮次 如 P1" style="width:90px">
           <input id="a-score" placeholder="分数" type="number" step="0.1" style="width:80px">
+          <select id="a-src"><option value="ai">有 AI 参与</option><option value="offline">无 AI（线下任务）</option></select>
           <button class="btn-primary" id="a-add">添加</button>
         </div></div>
         <div class="card"><h2>口语样本盲评</h2>
@@ -394,11 +412,12 @@
           </div>
           <button class="btn-sm" id="o-rate">盲评打分</button><div id="o-body"></div>
         </div>
-        <div class="card"><h2>成绩列表</h2><table><tr><th>学生</th><th>班</th><th>类型</th><th>阶段</th><th>分数</th><th>盲评</th></tr>${rows || "<tr><td colspan=6>无</td></tr>"}</table></div>`;
+        <div class="card"><h2>成绩列表</h2><table><tr><th>学生</th><th>班</th><th>类型</th><th>阶段</th><th>分数</th><th>盲评</th><th>来源</th></tr>${rows || "<tr><td colspan=7>无</td></tr>"}</table></div>`;
       document.getElementById("a-add").onclick = async () => {
         await api("/teacher/assessments", { method: "POST", body: JSON.stringify({ rows: [{
           student_id: parseInt(document.getElementById("a-stu").value), test_type: document.getElementById("a-type").value,
-          phase_or_wave: document.getElementById("a-wave").value, score: parseFloat(document.getElementById("a-score").value) }] }) });
+          phase_or_wave: document.getElementById("a-wave").value, score: parseFloat(document.getElementById("a-score").value),
+          task_source: document.getElementById("a-src").value }] }) });
         alert("已录入"); viewAssessments();
       };
       document.getElementById("o-upload").onclick = async () => {
@@ -427,6 +446,62 @@
           };
         });
       };
+    }
+
+    /* ---------- 11 班级周报（F5） ---------- */
+    async function viewWeekly() {
+      const el = document.getElementById("view");
+      const d = await api("/teacher/weekly_report");
+      const rows = d.classes.map(c => `
+        <tr>
+          <td><b>${esc(c.class_id)}</b></td>
+          <td><span class="tag">${esc(c.phase)}</span></td>
+          <td>${c.phase_days == null ? "—" : c.phase_days + " 天"}</td>
+          <td>${c.n_students}</td>
+          <td>${c.handoffs_total}${c.close_rate == null ? "" : ` <span class="muted">(${c.close_rate}% 闭环)</span>`}</td>
+          <td>${c.flags_new} 新增 / ${c.flags_open} 未解决</td>
+          <td class="wrap">${c.watch.length ? c.watch.map(w => `${esc(w.display_name)}（预警${w.flags}·提示${w.hints}）`).join("<br>") : "—"}</td>
+        </tr>`).join("");
+      el.innerHTML = `
+        <h1>📈 班级周报</h1>
+        <p class="muted">${esc(d.week_start)} ~ ${esc(d.week_end)}（泰国时区 UTC+7）</p>
+        <div class="card"><table>
+          <tr><th>班级</th><th>阶段</th><th>已持续</th><th>学生数</th><th>本周交接</th><th>回避预警</th><th>需关注 TOP3</th></tr>
+          ${rows || "<tr><td colspan=7>无数据</td></tr>"}
+        </table></div>
+        ${d.pending_phase_reminders && d.pending_phase_reminders.length ? `<div class="card"><h2>⏰ 阶段切换提醒</h2>
+          ${d.pending_phase_reminders.map(p => `<p>${esc(p[0])} · ${esc(p[1])} 阶段还有 <b>${p[2]}</b> 天结束，请检查下一阶段配置、准备保真度清单、确认学生端通知文案。</p>`).join("")}
+        </div>` : ""}`;
+    }
+
+    /* ---------- 12 通知中心（F6/F8/F12） ---------- */
+    async function viewNotifications() {
+      const el = document.getElementById("view");
+      const d = await api("/teacher/notifications");
+      el.innerHTML = `
+        <h1>🔔 通知中心 <button class="btn-primary btn-sm" id="n-scan" style="margin-left:8px">立即扫描</button></h1>
+        <p class="muted">回避预警 / 交接提醒 / 阶段提醒 / 学习鼓励。打开「班级总览」时会自动扫描一次。</p>
+        <div class="card">
+          ${d.notifications.length ? d.notifications.map(n => `
+            <div class="notif-row ${n.read ? "" : "unread"}" data-id="${n.id}">
+              <div class="nr-kind">${esc(d.kind_labels[n.kind] || n.kind || "")}</div>
+              <div class="nr-title">${esc(n.title || "")}</div>
+              ${n.body ? `<div class="nr-body">${esc(n.body)}</div>` : ""}
+              <div class="nr-time">${esc(n.created_at || "")}</div>
+            </div>`).join("") : "<p class='muted'>暂无通知</p>"}
+        </div>`;
+      document.getElementById("n-scan").onclick = async () => {
+        const r = await api("/teacher/scan", { method: "POST" });
+        alert(`扫描完成\n新增回避预警：${r.avoidance}\n新增 T2 交接：${r.t2}\n动机提醒：${r.motivation}\n阶段提醒：${r.phase}`);
+        viewNotifications(); updateBadge();
+      };
+      el.querySelectorAll(".notif-row.unread").forEach(row => {
+        row.onclick = async () => {
+          await api(`/teacher/notifications/${row.dataset.id}/read`, { method: "POST" });
+          row.classList.remove("unread");
+          updateBadge();
+        };
+      });
     }
 
     /* ---------- 10 数据导出 ---------- */

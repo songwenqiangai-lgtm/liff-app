@@ -18,6 +18,7 @@ from database import get_conn, content_db, init_db, seed_items
 from llm import chat_json, chat_text
 from prompts import feedback_messages, ask_messages, pronounce_messages
 import fidelity_config as FC
+import analytics as AN
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "frontend"))
@@ -147,7 +148,7 @@ def log_teacher_action(action_type, target_class=None, detail=None, teacher_id="
 
 
 def _add_handoff(student_id, class_id, t_type, direction, trigger,
-                 ai_action=None, source="auto_platform"):
+                 ai_action=None, source="auto_platform", auto=0):
     conn = get_conn()
     exists = conn.execute(
         "SELECT COUNT(*) c FROM handoff_events WHERE student_id=? AND t_type=? AND closed=0",
@@ -155,9 +156,15 @@ def _add_handoff(student_id, class_id, t_type, direction, trigger,
     if exists:
         return False
     conn.execute(
-        "INSERT INTO handoff_events(student_id,class_id,t_type,direction,trigger,ai_action,source) VALUES(?,?,?,?,?,?,?)",
-        (student_id, class_id, t_type, direction, trigger, ai_action, source))
+        "INSERT INTO handoff_events(student_id,class_id,t_type,direction,trigger,ai_action,source,auto_triggered) VALUES(?,?,?,?,?,?,?,?)",
+        (student_id, class_id, t_type, direction, trigger, ai_action, source, auto))
     conn.commit()
+    # F6/F7：新交接（T3 已由回避预警单独通知）→ 提醒教师处理
+    if t_type != "T3":
+        st = conn.execute("SELECT display_name FROM students WHERE id=?", (student_id,)).fetchone()
+        AN.notify("teacher", "all", "handoff",
+                  f"🔁 {class_id or ''} {st['display_name'] if st else student_id} 触发 {t_type} 交接",
+                  trigger or "")
     return True
 
 
@@ -174,44 +181,80 @@ def _add_flag(student_id, flag_type):
     st = conn.execute("SELECT class_id FROM students WHERE id=?", (student_id,)).fetchone()
     _add_handoff(student_id, st["class_id"] if st else None, "T3", "hard_to_soft",
                  trigger=f"回避预警：{FC.FLAG_TYPE_LABELS.get(flag_type, flag_type)}",
-                 ai_action="平台自动标记回避模式")
+                 ai_action="平台自动标记回避模式", auto=1)
     conn.commit()
     return True
 
 
 def scan_avoidance():
-    """回避检测：极短作答 / 连续未提交 / 会话骤停。返回本次新建的 flag 列表。"""
-    conn = get_conn()
+    """回避检测：极短作答 / 连续未提交 / 会话骤停。返回本次新建的 flag 学生 id 列表。
+
+    检测逻辑在 analytics.detect_avoidance()（统一走泰国时区），这里只负责落库与通知。
+    """
     created = []
-    # 1) 连续 NO_SUBMIT_DAYS 日无提交（活跃班 + 近期有活动但近期无提交）
-    cutoff = (datetime.utcnow() - timedelta(days=FC.NO_SUBMIT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-    rows = conn.execute("""
-        SELECT DISTINCT s.id FROM students s
-        WHERE s.class_id IN (SELECT class_id FROM phase_config WHERE phase IN ('P1','P3'))
-          AND (SELECT MAX(created_at) FROM logs WHERE student_id=s.id) >= datetime('now','-7 days')
-          AND (SELECT MAX(created_at) FROM logs WHERE student_id=s.id AND event_type='input_submit') IS NULL
-             OR (SELECT MAX(created_at) FROM logs WHERE student_id=s.id AND event_type='input_submit') < ?
-    """, (cutoff,)).fetchall()
-    for r in rows:
-        if _add_flag(r["id"], "no_submit_2d"):
-            created.append(r["id"])
-    # 2) 会话骤停：session_start 后 SESSION_ABORT_MINUTES 内无后续事件
-    cutoff_abort = (datetime.utcnow() - timedelta(minutes=FC.SESSION_ABORT_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
-    rows = conn.execute("""
-        SELECT l1.student_id FROM logs l1
-        WHERE l1.event_type='session_start' AND l1.created_at < ?
-          AND NOT EXISTS (SELECT 1 FROM logs l2 WHERE l2.student_id=l1.student_id
-                          AND l2.event_type!='session_start' AND l2.id>l1.id
-                          AND l2.created_at < datetime('now','-1 minutes'))
-          AND NOT EXISTS (SELECT 1 FROM avoidance_flags af
-                          WHERE af.student_id=l1.student_id AND af.flag_type='session_abort' AND af.resolved=0)
-        GROUP BY l1.student_id
-    """, (cutoff_abort,)).fetchall()
-    for r in rows:
-        if _add_flag(r["student_id"], "session_abort"):
-            created.append(r["student_id"])
-    conn.commit()
+    for student_id, flag_type in AN.detect_avoidance():
+        if _add_flag(student_id, flag_type):
+            created.append(student_id)
+            _notify_teacher_for_flag(student_id, flag_type)
     return created
+
+
+def _notify_teacher_for_flag(student_id, flag_type):
+    """F6：新回避预警 → 写一条教师通知"""
+    st = get_conn().execute(
+        "SELECT display_name, class_id FROM students WHERE id=?", (student_id,)
+    ).fetchone()
+    if not st:
+        return
+    label = FC.FLAG_TYPE_LABELS.get(flag_type, flag_type)
+    AN.notify(
+        "teacher", "all", "avoidance",
+        f"⚠️ {st['class_id']} {st['display_name']} 触发回避预警",
+        f"类型：{label}。建议课间单独关心。",
+    )
+
+
+def scan_t2_handoffs():
+    """F7：AI 反馈后超过 T2_IDLE_HOURS 小时仍未提交修订 → 自动建 T2 反馈授权交接"""
+    created = 0
+    for student_id, item_id, class_id in AN.detect_t2_pending():
+        if _add_handoff(student_id, class_id, "T2", "hard_to_soft",
+                        trigger=f"item={item_id} AI 反馈后 {FC.T2_IDLE_HOURS}h 未提交修订",
+                        ai_action="AI 已给出反馈，等待学生审读采纳", auto=1):
+            created += 1
+    return created
+
+
+def scan_motivation():
+    """F12：连续 MOTIVATION_IDLE_DAYS 天未登录 → 给学生写一条温和鼓励通知"""
+    created = 0
+    for student_id, gap in AN.detect_idle_students():
+        if AN.notify("student", student_id, "motivation",
+                     "我们想念你了！",
+                     f"已经 {gap} 天没来学中文啦，今天来复习一下吧～ 点击继续学习"):
+            created += 1
+    return created
+
+
+def scan_phase_reminders():
+    """F8：阶段结束前 PHASE_REMIND_DAYS 天 → 提醒教师准备下一阶段"""
+    created = 0
+    for class_id, phase, days_left in AN.detect_phase_reminders():
+        if AN.notify("teacher", "all", "phase",
+                     f"🔄 {class_id} 的 {phase} 阶段还有 {days_left} 天结束",
+                     "请检查下一阶段配置、准备保真度清单、确认学生端通知文案。", dedup=False):
+            created += 1
+    return created
+
+
+def run_all_scans():
+    """教师打开总览时统一触发（替代定时任务，Render 免费档会休眠）"""
+    return {
+        "avoidance": len(scan_avoidance()),
+        "t2": scan_t2_handoffs(),
+        "motivation": scan_motivation(),
+        "phase": scan_phase_reminders(),
+    }
 
 
 def maybe_create_t1(student, item_id, verdict):
@@ -229,7 +272,7 @@ def maybe_create_t1(student, item_id, verdict):
     if hint_used >= 1 or err_streak >= 3:
         _add_handoff(student["id"], student["class_id"], "T1", "hard_to_soft",
                      trigger=f"item={item_id} 提示阶梯用尽后仍错(hint≥3:{hint_used}) / 连续错({err_streak})",
-                     ai_action="AI 提示阶梯已用尽，仍判 incorrect")
+                     ai_action="AI 提示阶梯已用尽，仍判 incorrect", auto=1)
 
 
 def teacher_guard(request: Request):
@@ -425,8 +468,26 @@ def api_login(req: LoginReq):
             (f"sn-{req.class_id}-{sno}", name, req.class_id, track, sno))
         conn.commit()
         student = conn.execute("SELECT * FROM students WHERE id=?", (cur.lastrowid,)).fetchone()
+    # F12：距上次登录超过阈值 → 先写一条温和鼓励通知（必须在本次登录入库前判断）
+    prev = conn.execute(
+        """SELECT MAX(created_at) m FROM logs
+           WHERE student_id=? AND event_type='student_login'""",
+        (student["id"],)).fetchone()["m"]
+    if prev:
+        gap = conn.execute(
+            f"SELECT CAST(julianday(date('now','{FC.TZ_OFFSET}')) - julianday(date(?,'{FC.TZ_OFFSET}')) AS INT)",
+            (prev,)).fetchone()[0]
+        if gap is not None and gap >= FC.MOTIVATION_IDLE_DAYS:
+            AN.notify("student", student["id"], "motivation", "我们想念你了！",
+                      f"已经 {gap} 天没来学中文啦，今天来复习一下吧～")
     log_event(student, "student_login")
-    return {"token": make_token(student["id"]), "student": dict(student)}
+    # F1：登录时懒生成本周报告（同周已生成则直接读缓存）
+    try:
+        AN.generate_weekly_report(student["id"])
+    except Exception:
+        pass  # 报告生成失败不能阻断登录
+    return {"token": make_token(student["id"]), "student": dict(student),
+            "unread": AN.unread_count("student", student["id"])}
 
 
 @app.get("/api/me")
@@ -823,6 +884,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @app.get("/teacher/overview")
 def teacher_overview(request: Request):
     teacher_guard(request)
+    # F6/F7/F8/F12：打开总览时统一跑一遍扫描（替代定时任务，Render 免费档会休眠）
+    try:
+        run_all_scans()
+    except Exception:
+        pass  # 扫描失败不能阻断总览
     conn = get_conn()
     classes = []
     for r in conn.execute(
@@ -839,6 +905,7 @@ def teacher_overview(request: Request):
     return {"classes": classes,
             "open_handoffs_total": conn.execute("SELECT COUNT(*) c FROM handoff_events WHERE closed=0").fetchone()["c"],
             "open_avoidance": conn.execute("SELECT COUNT(*) c FROM avoidance_flags WHERE resolved=0").fetchone()["c"],
+            "unread_notifications": AN.unread_count("teacher", "all"),
             "phases": FC.PHASE_LIST, "phase_labels": FC.PHASE_LABELS}
 
 
@@ -856,15 +923,22 @@ def teacher_student_detail(request: Request, student_id: int, phase: str = ""):
     submits = conn.execute(f"SELECT COUNT(*) c FROM logs WHERE student_id=? AND event_type='input_submit'{pw}", base).fetchone()["c"]
     hints = {r["hint_level"]: r["c"] for r in conn.execute(
         f"SELECT hint_level, COUNT(*) c FROM logs WHERE student_id=? AND event_type='hint_request'{pw} GROUP BY hint_level", base).fetchall()}
-    follows = conn.execute(f"SELECT COUNT(*) c FROM logs WHERE student_id=? AND event_type='followup_question'{pw}", base).fetchone()["c"]
+    # 主动提问：原先统计 'followup_question'，但该 event_type 从未被写入过（恒为 0）。
+    # 改用真实存在的 'ask_question'（询问 AI 板块的提问）。
+    follows = conn.execute(f"SELECT COUNT(*) c FROM logs WHERE student_id=? AND event_type='ask_question'{pw}", base).fetchone()["c"]
     adoption = {"full": 0, "partial": 0, "rejected": 0}
     for r in conn.execute("SELECT adopted, COUNT(*) c FROM feedback_events WHERE student_id=? GROUP BY adopted", (student_id,)).fetchall():
         if r["adopted"] in adoption:
             adoption[r["adopted"]] = r["c"]
     total_fb = sum(adoption.values())
+    # F4：反馈决策理由分布（H3 能动性中介的行为证据）
+    decisions = {r["reason_type"]: r["c"] for r in conn.execute(
+        "SELECT reason_type, COUNT(*) c FROM decision_reasons WHERE student_id=? GROUP BY reason_type",
+        (student_id,)).fetchall()}
     return {"student_id": student_id, "display_name": student["display_name"], "class_id": student["class_id"],
             "sessions": sessions, "submits": submits, "hints_by_level": hints, "followup_count": follows,
             "adoption": adoption, "adoption_rate": round(adoption["full"] / total_fb * 100) if total_fb else None,
+            "decisions": decisions, "decision_labels": FC.DECISION_REASON_LABELS,
             "flag_labels": FC.FLAG_TYPE_LABELS}
 
 
@@ -1064,9 +1138,11 @@ def teacher_assessments_create(req: AssessmentReq, request: Request):
         if not r.get("student_id"):
             continue
         conn.execute(
-            "INSERT INTO assessments(student_id,test_type,phase_or_wave,score,rater_id,rater_blind) VALUES(?,?,?,?,?,?)",
+            """INSERT INTO assessments(student_id,test_type,phase_or_wave,score,rater_id,rater_blind,task_source)
+               VALUES(?,?,?,?,?,?,?)""",
             (r["student_id"], r.get("test_type", ""), r.get("phase_or_wave", ""),
-             r.get("score"), r.get("rater_id", ""), 1 if r.get("rater_blind") else 0))
+             r.get("score"), r.get("rater_id", ""), 1 if r.get("rater_blind") else 0,
+             r.get("task_source") or "ai"))
         n += 1
     conn.commit()
     return {"ok": True, "inserted": n}
@@ -1232,6 +1308,212 @@ def dev_login(req: DevLoginReq, request: Request):
         conn.commit()
         row = conn.execute("SELECT * FROM students WHERE id=?", (cur.lastrowid,)).fetchone()
     return {"token": make_token(row["id"]), "student": dict(row)}
+
+
+# ============ 功能增强接口（F1–F12） ============
+
+
+class FeedbackReasonReq(BaseModel):
+    reason_type: str                      # agree / disagree / not_sure
+    reason_text: str = ""
+    item_id: Optional[int] = None
+
+
+class OfflineTaskReq(BaseModel):
+    student_id: int
+    task_type: str                        # oral / writing
+    phase: str = ""
+    score: float = 0
+
+
+@app.get("/api/weekly_report")
+def api_weekly_report(request: Request, force: int = 0):
+    """F1 学生学习周报（懒生成，同周缓存）"""
+    student = get_student(parse_token(request))
+    m = AN.generate_weekly_report(student["id"], force=bool(force))
+    m["display_name"] = student["display_name"]
+    return m
+
+
+@app.get("/api/diagnostics")
+def api_diagnostics(request: Request):
+    """F2 薄弱点诊断"""
+    student = get_student(parse_token(request))
+    points = AN.weak_points(student["id"])
+    AN.save_diagnostics(student["id"], current_phase(student["class_id"]), points)
+    return {"weak_points": points,
+            "module_labels": FC.WEAK_POINT_MODULE_LABELS,
+            "min_count": FC.WEAK_POINT_MIN_COUNT}
+
+
+@app.get("/api/suggestions")
+def api_suggestions(request: Request):
+    """F3 个性化学习建议（首次访问时按薄弱点生成并入库）"""
+    student = get_student(parse_token(request))
+    points = AN.weak_points(student["id"])
+    return {"suggestions": AN.ensure_suggestions(student["id"], points)}
+
+
+@app.post("/api/suggestions/{suggestion_id}/click")
+def api_suggestion_click(suggestion_id: int, request: Request):
+    """F3 记录学生点击了某条建议（能动性证据）"""
+    student = get_student(parse_token(request))
+    conn = get_conn()
+    conn.execute(
+        "UPDATE suggestions SET clicked_at=datetime('now') WHERE id=? AND student_id=? AND clicked_at IS NULL",
+        (suggestion_id, student["id"]))
+    conn.commit()
+    log_event(student, "suggestion_click", detail={"suggestion_id": suggestion_id})
+    return {"ok": True}
+
+
+@app.post("/api/feedback/reason")
+def api_feedback_reason(req: FeedbackReasonReq, request: Request):
+    """F4 反馈采纳理由收集（H3 能动性中介的行为证据）"""
+    student = get_student(parse_token(request))
+    if req.reason_type not in FC.DECISION_REASON_LABELS:
+        raise HTTPException(400, "unknown reason_type")
+    conn = get_conn()
+    # 关联该生最近一条反馈事件（feedback_events 不存 item_id，故取最近一条）
+    fe = conn.execute(
+        "SELECT id FROM feedback_events WHERE student_id=? ORDER BY id DESC LIMIT 1",
+        (student["id"],)).fetchone()
+    fe_id = fe["id"] if fe else None
+    cur = conn.execute(
+        """INSERT INTO decision_reasons(feedback_event_id,student_id,reason_type,reason_text)
+           VALUES(?,?,?,?)""",
+        (fe_id, student["id"], req.reason_type, req.reason_text or ""))
+    reason_id = cur.lastrowid
+    if fe_id:
+        conn.execute(
+            """UPDATE feedback_events SET decision_reason_id=?,
+               reject_reason=?, adopted=?
+               WHERE id=?""",
+            (reason_id, req.reason_text or req.reason_type,
+             "rejected" if req.reason_type == "disagree" else "full", fe_id))
+    conn.commit()
+    log_event(student, "feedback_decision", req.item_id and "exercise" or None, req.item_id,
+              detail={"reason_type": req.reason_type, "reason_text": req.reason_text})
+    return {"ok": True, "reason_id": reason_id}
+
+
+@app.get("/api/radar")
+def api_radar(request: Request):
+    """F9 能力雷达图"""
+    student = get_student(parse_token(request))
+    return AN.radar_scores(student["id"])
+
+
+@app.get("/api/offline_task")
+def api_offline_task(request: Request):
+    """F10 T1/T2 阶段的无 AI 线下迁移任务说明"""
+    student = get_student(parse_token(request))
+    phase = current_phase(student["class_id"])
+    active = phase in ("T1", "T2")
+    conn = get_conn()
+    done = conn.execute(
+        """SELECT task_type, score, submitted_at FROM task_offline
+           WHERE student_id=? AND phase=? ORDER BY id DESC""",
+        (student["id"], phase)).fetchall()
+    return {"phase": phase, "active": active,
+            "tasks": [{"key": k, **v} for k, v in FC.OFFLINE_TASKS.items()],
+            "submitted": [dict(d) for d in done]}
+
+
+@app.get("/api/notifications")
+def api_notifications(request: Request):
+    """站内通知中心（学生）"""
+    student = get_student(parse_token(request))
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT id, kind, title, body, read, created_at FROM notifications
+           WHERE user_type='student' AND user_id=? ORDER BY id DESC LIMIT 50""",
+        (str(student["id"]),)).fetchall()
+    return {"notifications": [dict(r) for r in rows],
+            "unread": AN.unread_count("student", student["id"]),
+            "kind_labels": FC.NOTIFICATION_KINDS}
+
+
+@app.get("/api/notifications/unread_count")
+def api_notifications_unread(request: Request):
+    student = get_student(parse_token(request))
+    return {"unread": AN.unread_count("student", student["id"])}
+
+
+@app.post("/api/notifications/{nid}/read")
+def api_notification_read(nid: int, request: Request):
+    student = get_student(parse_token(request))
+    conn = get_conn()
+    conn.execute(
+        "UPDATE notifications SET read=1 WHERE id=? AND user_type='student' AND user_id=?",
+        (nid, str(student["id"])))
+    conn.commit()
+    return {"ok": True, "unread": AN.unread_count("student", student["id"])}
+
+
+# ---------- 教师端增强接口 ----------
+
+@app.get("/teacher/weekly_report")
+def teacher_weekly_report(request: Request):
+    """F5 教师班级周报（打开时生成）"""
+    teacher_guard(request)
+    return AN.teacher_weekly_report()
+
+
+@app.post("/teacher/scan")
+def teacher_scan(request: Request):
+    """F6/F7/F8/F12 手动触发全部扫描器"""
+    teacher_guard(request)
+    result = run_all_scans()
+    log_teacher_action("run_scan", detail=result)
+    return {"ok": True, **result}
+
+
+@app.get("/teacher/notifications")
+def teacher_notifications(request: Request):
+    """教师通知中心"""
+    teacher_guard(request)
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT id, kind, title, body, read, created_at FROM notifications
+           WHERE user_type='teacher' AND user_id='all' ORDER BY id DESC LIMIT 100""").fetchall()
+    return {"notifications": [dict(r) for r in rows],
+            "unread": AN.unread_count("teacher", "all"),
+            "kind_labels": FC.NOTIFICATION_KINDS}
+
+
+@app.post("/teacher/notifications/{nid}/read")
+def teacher_notification_read(nid: int, request: Request):
+    teacher_guard(request)
+    conn = get_conn()
+    conn.execute(
+        "UPDATE notifications SET read=1 WHERE id=? AND user_type='teacher' AND user_id='all'",
+        (nid,))
+    conn.commit()
+    return {"ok": True, "unread": AN.unread_count("teacher", "all")}
+
+
+@app.post("/teacher/offline_task")
+def teacher_offline_task(req: OfflineTaskReq, request: Request):
+    """F10 录入线下迁移任务成绩（task_source 固定 offline）"""
+    teacher_guard(request)
+    if req.task_type not in FC.OFFLINE_TASKS:
+        raise HTTPException(400, "unknown task_type")
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO task_offline(student_id,phase,task_type,score,task_source)
+           VALUES(?,?,?,?,'offline')""",
+        (req.student_id, req.phase, req.task_type, req.score))
+    # 同时写入 assessments，便于统一导出与统计
+    conn.execute(
+        """INSERT INTO assessments(student_id,test_type,phase_or_wave,score,task_source)
+           VALUES(?,'transfer_task',?,?,'offline')""",
+        (req.student_id, req.phase, req.score))
+    conn.commit()
+    log_teacher_action("offline_task_score", detail={"student_id": req.student_id,
+                                                     "task_type": req.task_type,
+                                                     "score": req.score})
+    return {"ok": True}
 
 
 # ---------- 静态页面（必须放最后） ----------
