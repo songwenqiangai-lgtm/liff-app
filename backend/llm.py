@@ -60,8 +60,17 @@ def parse_json(text: str) -> dict:
 
 
 async def chat_json(messages: list, temperature: float = 0.3, timeout: float = 90, provider=None) -> dict:
-    """调用 LLM 并强制解析为 JSON。未配置 key 或出错时返回错误占位（不中断学生端）。
-    provider: None=DeepSeek(默认) / "mm"=MiniMax(中文内容)"""
+    """调用 LLM 并强制解析为 JSON。任何异常都降级为错误占位，不中断学生端。"""
+    try:
+        return await _chat_json(messages, temperature, timeout, provider)
+    except Exception:
+        out = dict(FALLBACK_RESULT)
+        out["error_type"] = "unexpected"
+        return out
+
+
+async def _chat_json(messages: list, temperature: float, timeout: float, provider) -> dict:
+    """provider: None=默认(泰/英) / "mm"=中文分支"""
     base_url, api_key, model = provider_conf(provider)
     if not api_key:
         out = dict(FALLBACK_RESULT)
@@ -105,8 +114,19 @@ async def chat_json(messages: list, temperature: float = 0.3, timeout: float = 9
 
 
 async def chat_text(messages: list, temperature: float = 0.5, timeout: float = 90, provider=None) -> str:
-    """调用 LLM 返回纯文本回答。未配置 key 或出错时返回泰语错误提示。
-    provider: None=DeepSeek(默认) / "mm"=MiniMax(中文内容)"""
+    """调用 LLM 返回纯文本回答。任何异常都降级为泰语提示，绝不把 500 抛给学生。
+
+    兜底范围故意用 Exception 而不是 httpx.HTTPError：httpx 的 InvalidURL 等
+    并不继承 HTTPError，此前会在 Render 上穿透成 500。
+    """
+    try:
+        return await _chat_text(messages, temperature, timeout, provider)
+    except Exception:
+        return "ครู AI ตอบไม่ได้ชั่วคราว ลองอีกครั้งนะ"
+
+
+async def _chat_text(messages: list, temperature: float, timeout: float, provider) -> str:
+    """provider: None=默认(泰/英) / "mm"=中文分支"""
     base_url, api_key, model = provider_conf(provider)
     if not api_key:
         return "ระบบยังไม่พร้อม (LLM_API_KEY ยังไม่ได้ตั้งค่า) โปรดแจ้งครู"
