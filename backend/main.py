@@ -82,9 +82,44 @@ def phase_sections(phase: str) -> dict:
         "vocab": True, "text": True, "grammar": True,
     }
 
+def seed_demo_config():
+    """检测到"全新数据库"时自动铺一份可用配置。
+
+    Render 免费档磁盘是临时的，每次重新部署都会清空 app.db —— 课程分配与
+    阶段设置一并丢失，学生进去只看到空列表。这里在**无学生且无阶段配置**
+    时自动应用默认配置，并给教师留一条通知，避免静默改变实验设置。
+
+    正式做实验时把环境变量 AUTO_SEED_DEMO 设为 0 即可关闭。
+    """
+    if os.getenv("AUTO_SEED_DEMO", "1") != "1":
+        return
+    conn = get_conn()
+    if conn.execute("SELECT COUNT(*) c FROM phase_config").fetchone()["c"]:
+        return
+    if conn.execute("SELECT COUNT(*) c FROM students").fetchone()["c"]:
+        return  # 有学生说明不是全新库（可能是被清空后重建），不擅自改
+    first_lessons = {"M41": ["1", "2", "3"], "FH1": ["1", "2", "3"], "M51": ["16", "17", "18"],
+                     "FH2": ["1", "2", "3"], "M61": ["13", "14", "15"]}
+    for class_id, book in CLASS_CONTENT.items():
+        conn.execute(
+            """INSERT INTO phase_config(class_id,phase,ai_enabled,teacher_response_allowed,start_time)
+               VALUES(?,?,1,0,datetime('now'))
+               ON CONFLICT(class_id) DO NOTHING""",
+            (class_id, "P1"))
+        for ln in first_lessons.get(book, ["1", "2", "3"]):
+            conn.execute(
+                "INSERT OR IGNORE INTO class_lessons(class_id,book,lesson_no) VALUES(?,?,?)",
+                (class_id, book, ln))
+    conn.commit()
+    AN.notify("teacher", "all", "phase",
+              "🔧 检测到全新数据库，已自动应用演示配置",
+              "6 个班已设为 P1 纯AI 并各分配前 3 课。请到「阶段管理」和「课程分配」确认是否符合本次实验设计。")
+
+
 app = FastAPI(title="Thai-Chinese Tutor LIFF")
 init_db()
 seed_items()
+seed_demo_config()
 
 
 # ---------- 通用工具 ----------
