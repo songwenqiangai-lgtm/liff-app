@@ -4,14 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>หน้าหลัก · 中文小老师</title>
-  <link rel="stylesheet" href="/assets/style.css?v=7">
+  <link rel="stylesheet" href="/assets/style.css?v=8">
   <style>
     .home-hero { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-4) var(--s-3); }
-    .home-hero img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); }
-    .home-hero .name { font-weight: 700; font-size: 1.05rem; color: var(--c-text); }
-    .home-hero .role { color: var(--c-muted); font-size: .8rem; }
-    .home-hero .logout { margin-left: auto; padding: 8px 14px; border-radius: 999px;
-      background: transparent; color: var(--c-muted); border: none; font-size: .85rem; }
+    .home-hero img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); flex-shrink: 0; }
+    .home-hero .who { flex: 1; min-width: 0; }
+    .home-hero .name { font-weight: 700; font-size: 1.05rem; color: var(--c-text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .home-hero .role { color: var(--c-muted); font-size: .8rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .home-hero .bell { flex-shrink: 0; }
+    .logout-bar { padding: var(--s-4) var(--s-4) calc(var(--s-6) + env(safe-area-inset-bottom)); }
+    .logout-btn { display: block; width: 100%; padding: 14px; border-radius: var(--r-md);
+      background: #fff; color: var(--c-muted); border: 1px solid var(--c-line-2);
+      font-size: .9rem; font-family: inherit; cursor: pointer; }
+    .logout-btn:active { background: var(--c-primary-l); }
     .entry-grid { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
     .entry-card { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-5) var(--s-5);
       background: #fff; border-radius: var(--r-xl); box-shadow: var(--sh-2);
@@ -36,12 +43,11 @@
   <div class="app-wrap">
     <div class="home-hero">
       <img src="/assets/logo.jpg" alt="">
-      <div>
+      <div class="who">
         <div class="name" id="who">学生</div>
         <div class="role">สวัสดี · 欢迎回来</div>
       </div>
-      <a class="bell" href="notifications.html" style="margin-left:auto" title="通知">🔔<span class="dot-badge" id="bell-badge" style="display:none"></span></a>
-      <button class="logout" id="btn-out">ออกจากระบบ 退出</button>
+      <a class="bell" href="notifications.html" title="通知">🔔<span class="dot-badge" id="bell-badge" style="display:none"></span></a>
     </div>
 
     <div class="entry-grid">
@@ -104,6 +110,10 @@
         <path d="M 45 65 Q 50 70 55 65" stroke="#1f3d33" stroke-width="2" fill="none" stroke-linecap="round"/>
         <text x="50" y="88" text-anchor="middle" font-size="10" fill="#1f8a5f" font-weight="600">加油！</text>
       </svg>
+    </div>
+
+    <div class="logout-bar">
+      <button class="logout-btn" id="btn-out">🚪 ออกจากระบบ · 退出登录</button>
     </div>
   </div>
 

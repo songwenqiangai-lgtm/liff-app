@@ -46,6 +46,31 @@
     .stat .lbl { font-size: 0.8rem; color: #6d7f77; }
     .check-item { display: block; padding: 8px 0; border-bottom: 1px solid #eef4f1; }
     .error-text { color: #a3541f; font-size: 0.85rem; margin-top: 8px; }
+
+    /* ---------- 手机端适配（LINE 内建浏览器，唯一目标环境） ---------- */
+    @media (max-width: 760px) {
+      /* 侧边栏从左侧竖排改为顶部横向滚动标签条 */
+      .layout { flex-direction: column; min-height: auto; }
+      .sidenav { width: 100%; display: flex; gap: 6px; overflow-x: auto;
+                 padding: 8px 10px; position: sticky; top: 0; z-index: 20;
+                 -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+      .sidenav::-webkit-scrollbar { display: none; }
+      .sidenav h3 { display: none; }
+      .nav-item { display: inline-block; width: auto; flex: 0 0 auto;
+                  white-space: nowrap; margin-bottom: 0; padding: 8px 12px; }
+      /* 主内容占满整屏 */
+      #view { padding: 12px; }
+      h1 { font-size: 1.15rem; }
+      /* 表格在自己的卡片里横向滚动，而不是被 205px 的窄栏裁掉 */
+      .card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      th { position: static; }
+      th, td { padding: 6px 7px; }
+      td.wrap { max-width: 170px; }
+      .stat-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+      .row { gap: 6px; }
+      button, select, input, textarea { font-size: 0.85rem; }
+      #login { margin: 40px 16px; }
+    }
   </style>
 </head>
 <body>
