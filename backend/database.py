@@ -1,7 +1,14 @@
 import sqlite3, os, csv, glob, re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "app.db")
+
+# 持久化数据目录。
+# 部署到 Render 时把它指向挂载的持久磁盘（如 /var/data），这样重新部署
+# 不会清空学生数据；本地开发不设此变量，行为与以前完全一致。
+DATA_DIR = os.getenv("DATA_DIR") or BASE_DIR
+os.makedirs(DATA_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(DATA_DIR, "app.db")
 CONTENT_DB_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "content", "content.db"))
 CONTENT_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "content"))
 

@@ -14,7 +14,7 @@ try:
 except Exception:
     pass  # 没有 .env 时使用系统环境变量
 
-from database import get_conn, content_db, init_db, seed_items
+from database import get_conn, content_db, init_db, seed_items, DATA_DIR
 from llm import chat_json, chat_text
 from prompts import feedback_messages, ask_messages, pronounce_messages
 import fidelity_config as FC
@@ -912,7 +912,7 @@ def teacher_export(request: Request):
 
 
 # ---------- 教师端研究接口 ----------
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -1552,7 +1552,7 @@ def teacher_offline_task(req: OfflineTaskReq, request: Request):
 
 
 # ---------- 静态页面（必须放最后） ----------
-AUDIO_DIR = os.path.join(BASE_DIR, "audio")
+AUDIO_DIR = os.path.join(DATA_DIR, "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
