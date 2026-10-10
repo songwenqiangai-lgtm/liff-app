@@ -11,8 +11,9 @@
     <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     <div>กำลังโหลด... 正在加载</div>
   </div>
-  <script src="/assets/app.js?v=7"></script>
+  <script src="/assets/app.js?v=8"></script>
   <script>
+    const MODULE_LABELS = { pattern: "句型", vocab: "词汇", chat: "会话", writing: "写作" };
     let RPT = null, DIAG = null, SUGG = null, RADAR = null;
 
     (async () => {
@@ -73,6 +74,11 @@
       const wp = (DIAG && DIAG.weak_points) || [];
       const sg = (SUGG && SUGG.suggestions) || [];
       const dims = (RADAR && RADAR.dimensions) || [];
+      const bm = m.by_module || {};
+      const bmMax = Math.max(1, ...Object.values(bm));
+      const byModule = Object.entries(bm)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => ({ name: MODULE_LABELS[k] || k, count: v, pct: Math.round(v / bmMax * 100) }));
 
       app.innerHTML = `
         <div class="top-bar">
@@ -83,7 +89,9 @@
         <div class="app-wrap fade-in">
 
           <div class="report-hero">
-            <div class="rh-lbl">สัปดาห์นี้ · 本周正确率</div>
+            <div class="rh-lbl">สวัสดี · 你好</div>
+            <div style="font-size:1.2rem;font-weight:700;color:var(--c-text);margin-top:2px">${App.escapeHtml(m.display_name || "")}</div>
+            <div class="rh-lbl" style="margin-top:var(--s-4)">สัปดาห์นี้ · 本周正确率</div>
             <div class="rh-big">${acc}</div>
             <div class="rh-lbl">${m.week_start || ""} ~ ${m.week_end || ""}</div>
           </div>
@@ -101,6 +109,10 @@
             <div class="metric-row">
               <span class="m-name">使用提示 · การใช้คำใบ้</span>
               <span class="m-val">${m.hint_requests || 0}${deltaHtml(dl.hint_requests)}</span>
+            </div>
+            <div class="metric-row">
+              <span class="m-name">看答案次数 · ดูเฉลย</span>
+              <span class="m-val">${m.answer_views || 0}</span>
             </div>
             <div class="metric-row">
               <span class="m-name">学习天数 · วันที่เข้าเรียน</span>
@@ -121,6 +133,17 @@
             <p class="muted" style="font-size:.75rem;text-align:center;margin-top:var(--s-3)">
               ${App.escapeHtml((RADAR && RADAR.note) || "")}
             </p>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-3)">📚 แยกตามหมวด · 分模块练习</h2>
+            ${byModule.length ? byModule.map(x => `
+              <div class="module-row">
+                <div class="name">${App.escapeHtml(x.name)}</div>
+                <div class="bar"><span style="width:${x.pct}%"></span></div>
+                <div class="count t-mono">${x.count}</div>
+              </div>`).join("")
+              : '<p class="muted">ยังไม่มีข้อมูล · 本周还没有练习记录</p>'}
           </div>
 
           <div class="card">

@@ -49,9 +49,9 @@ const App = {
   speechSupported() {
     return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   },
-  speech(lang, onFinal, onInterim, onEnd) {
+  speech(lang, onFinal, onInterim, onEnd, onError) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return null;
+    if (!SR) { if (onError) onError("unsupported"); return null; }
     const rec = new SR();
     rec.lang = lang || "zh-CN";
     rec.interimResults = true;
@@ -67,9 +67,39 @@ const App = {
       if (final && onFinal) onFinal(final);
     };
     rec.onend = () => { if (onEnd) onEnd(); };
-    rec.onerror = () => { if (onEnd) onEnd(); };
-    try { rec.start(); } catch (e) { if (onEnd) onEnd(); }
+    // 把具体错误类型抛出去，方便区分"没权限/不支持/网络问题"
+    rec.onerror = (e) => { if (onError) onError((e && e.error) || "unknown"); if (onEnd) onEnd(); };
+    try { rec.start(); } catch (e) { if (onError) onError("start-failed"); if (onEnd) onEnd(); }
     return rec;
+  },
+
+  /* ---------- 中文朗读 ----------
+     优先播放配音文件；文件不存在（服务器未部署音频）或播放失败时，
+     自动退回浏览器内置的中文合成语音，保证"能听得到"。 */
+  speak(text, url) {
+    const tts = () => {
+      try {
+        if (!window.speechSynthesis || !text) return;
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(String(text));
+        u.lang = "zh-CN";
+        u.rate = 0.9;
+        const vs = window.speechSynthesis.getVoices() || [];
+        const v = vs.find(x => /^zh/i.test(x.lang)) || vs.find(x => /Chinese/i.test(x.name));
+        if (v) u.voice = v;
+        window.speechSynthesis.speak(u);
+      } catch (e) { /* 设备不支持合成语音，静默忽略 */ }
+    };
+    if (!url) return tts();
+    const a = new Audio(url);
+    let fell = false;
+    const fallback = () => { if (fell) return; fell = true; tts(); };
+    a.onerror = fallback;
+    const p = a.play();
+    if (p && p.catch) p.catch(fallback);
+  },
+  ttsSupported() {
+    return !!window.speechSynthesis;
   },
 
   /* ---------- 会话埋点 ---------- */

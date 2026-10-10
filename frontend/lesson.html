@@ -35,7 +35,7 @@
     <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     <div>กำลังโหลด... 正在加载</div>
   </div>
-  <script src="/assets/app.js?v=7"></script>
+  <script src="/assets/app.js?v=8"></script>
   <script>
     const LESSON = new URLSearchParams(location.search).get("lesson") || "1";
     const MODULE = new URLSearchParams(location.search).get("module") || "";
@@ -139,7 +139,7 @@
             </div>
           </div>
           <div id="vocab-list" style="display:none"></div>`;
-      document.getElementById("vocab-say").onclick = () => w.audio_url && new Audio(w.audio_url).play();
+      document.getElementById("vocab-say").onclick = () => App.speak(w.word, w.audio_url);
       document.getElementById("vocab-prev").onclick = () => { vocabIdx--; renderVocab(el); };
       document.getElementById("vocab-next").onclick = () => { vocabIdx++; renderVocab(el); };
       document.getElementById("vocab-list-btn").onclick = () => {
@@ -179,17 +179,11 @@
         </div>
         <p class="muted" style="text-align:center;margin-top: var(--s-4)">🔊 = 单句朗读 · 点击右侧</p>`;
       const btnSay = document.getElementById("text-say");
-      if (btnSay) btnSay.onclick = () => t.audio_url && new Audio(t.audio_url).play();
+      if (btnSay) btnSay.onclick = () => App.speak(t.body_zh, t.audio_url);
       el.querySelectorAll("[data-zi]").forEach(b => {
         b.onclick = () => {
           const text = sents[parseInt(b.dataset.zi)] || "";
-          if (!text) return;
-          fetch("/api/tts?text=" + encodeURIComponent(text)).then(r => r.ok ? r.blob() : null)
-            .then(blob => { if (blob) new Audio(URL.createObjectURL(blob)).play();
-              else if (window.speechSynthesis) {
-                const u = new SpeechSynthesisUtterance(text); u.lang = "zh-CN"; window.speechSynthesis.speak(u);
-              }
-            });
+          if (text) App.speak(text.trim());
         };
       });
     }
@@ -321,7 +315,12 @@
           };
         });
       } catch (e) {
-        fb.innerHTML = '<div class="feedback-box error-text">出错了，请重试</div>';
+        const msg = String((e && e.message) || e).slice(0, 140);
+        fb.innerHTML = `<div class="feedback-box error-text">提交失败：${App.escapeHtml(msg)}<br>`
+          + '<span style="font-size:.85rem">如果提示 504 或超时，是 AI 响应较慢，稍等片刻重试即可。</span></div>'
+          + '<button class="btn btn-primary btn-block" id="btn-retry" style="margin-top:var(--s-3)">重新提交</button>';
+        const rb = document.getElementById("btn-retry");
+        if (rb) rb.onclick = () => submitExercise(it, el);
       } finally {
         exBusy = false;
         btn.disabled = false; btn.textContent = "ส่ง 提交";
@@ -339,23 +338,32 @@
       el.innerHTML = `
         <div class="card fade-in" style="margin-bottom: var(--s-4)">
           <h2 style="margin-bottom: var(--s-2)">🗣️ ฝึกออกเสียง · 发音</h2>
-          <p class="muted">点句子听录音，然后跟读，AI 评价你的发音</p>
+          <p class="muted">先点「🔊 先听一遍」听发音，再点「🎤 跟读」让 AI 评价</p>
         </div>` + targets.map((s, i) => `
           <div class="card fade-in" style="padding: var(--s-4)">
             <div style="display:flex;align-items:center;gap: var(--s-3);margin-bottom: var(--s-3)">
               <span class="muted t-mono">${i + 1}</span>
               <div style="flex:1" class="t-cn">${App.escapeHtml(s.trim())}</div>
             </div>
+            <button class="btn btn-secondary btn-block btn-lg" data-listen="${i}" style="margin-bottom:var(--s-2)">🔊 ฟังก่อน · 先听一遍</button>
             <button class="btn btn-primary btn-block btn-lg" data-p="${i}">🎤 跟读</button>
             <div id="pr-${i}"></div>
           </div>`).join("");
+      el.querySelectorAll("[data-listen]").forEach(b => b.onclick = () => {
+        App.speak(targets[parseInt(b.dataset.listen)].trim());
+      });
       el.querySelectorAll("[data-p]").forEach(b => b.onclick = () => pronounceOne(el, targets, parseInt(b.dataset.p), b));
     }
 
     async function pronounceOne(el, targets, i, btn) {
-      if (!App.speechSupported()) { alert("此设备不支持语音识别"); return; }
       const box = document.getElementById("pr-" + i);
       const target = targets[i];
+      if (!App.speechSupported()) {
+        box.innerHTML = '<div class="feedback-box error-text">此浏览器不支持语音识别。'
+          + '<br><span style="font-size:.85rem">建议用 Chrome 或 Safari 打开；若在 LINE 里，'
+          + '可点右上角「⋯」→「在浏览器中打开」。你仍然可以先点「先听一遍」听发音、自己跟读。</span></div>';
+        return;
+      }
       btn.textContent = "⏺ กำลังฟัง..."; btn.disabled = true;
       box.innerHTML = '<div class="loading-pulse"><div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>请朗读...</div>';
       App.speech("zh-CN",
@@ -366,11 +374,27 @@
             const r = await App.call("/api/pronounce", { method: "POST", body: JSON.stringify({ target_text: target, recognized_text: final }) });
             box.innerHTML = `<div class="feedback-box"><b>识别到：</b> ${App.escapeHtml(r.recognized || final)}</div><div class="explain-box">${App.escapeHtml(r.feedback)}</div>`;
           } catch (e) {
-            box.innerHTML = '<div class="feedback-box error-text">出错了，请重试</div>';
+            box.innerHTML = `<div class="feedback-box error-text">AI 评价失败：${App.escapeHtml(String(e.message || e).slice(0, 80))}<br>`
+              + '<span style="font-size:.85rem">（识别结果已记录，可稍后重试）</span></div>';
           }
         },
         (interim) => { box.innerHTML = `<p class="muted">${App.escapeHtml(interim || "")}</p>`; },
-        () => { btn.textContent = "🎤 跟读"; btn.disabled = false; });
+        () => { btn.textContent = "🎤 跟读"; btn.disabled = false; },
+        (err) => {
+          const msgs = {
+            "not-allowed": "麦克风权限被拒绝。请在浏览器里允许本网站使用麦克风后重试。",
+            "service-not-allowed": "浏览器不允许使用语音识别服务。",
+            "audio-capture": "找不到麦克风设备。",
+            "network": "语音识别需要联网，请检查网络后重试。",
+            "no-speech": "没有听到声音，请靠近麦克风再说一次。",
+            "aborted": "",
+          };
+          const m = msgs[err];
+          if (m === "") return;  // 用户主动取消，不提示
+          box.innerHTML = '<div class="feedback-box error-text">'
+            + App.escapeHtml(m || ("语音识别失败（" + err + "）"))
+            + '<br><span style="font-size:.85rem">你仍然可以先点「先听一遍」听发音、自己跟读。</span></div>';
+        });
     }
 
     /* ===== 考试 ===== */

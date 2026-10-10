@@ -29,7 +29,6 @@
       color: #fff; display: flex; align-items: center; justify-content: center;
       font-size: 1.8rem; flex-shrink: 0; box-shadow: 0 4px 12px rgba(31,138,95,.25); }
     .entry-card.ask .ec-icon { background: linear-gradient(135deg, #2e6cb0, #1f4e8a); box-shadow: 0 4px 12px rgba(46,108,176,.25); }
-    .entry-card.stats .ec-icon { background: linear-gradient(135deg, #d9902e, #b86d1d); box-shadow: 0 4px 12px rgba(217,144,46,.25); }
     .entry-card.report .ec-icon { background: linear-gradient(135deg, #7b5cc4, #5a3f9e); box-shadow: 0 4px 12px rgba(123,92,196,.25); }
     .entry-card .ec-text { flex: 1; }
     .entry-card .ec-zh { font-weight: 700; font-size: 1.1rem; color: var(--c-text); font-family: "Noto Sans SC", sans-serif; }
@@ -69,20 +68,11 @@
         <div class="ec-arrow">→</div>
       </a>
 
-      <a class="entry-card stats" href="progress.html">
-        <div class="ec-icon">📊</div>
-        <div class="ec-text">
-          <div class="ec-zh">数据统计</div>
-          <div class="ec-th">ความคืบหน้า · 你的学习进度</div>
-        </div>
-        <div class="ec-arrow">→</div>
-      </a>
-
       <a class="entry-card report" href="report.html">
         <div class="ec-icon">📈</div>
         <div class="ec-text">
           <div class="ec-zh">我的报告</div>
-          <div class="ec-th">รายงานและจุดอ่อน · 周报 / 薄弱点 / 建议</div>
+          <div class="ec-th">รายงานและจุดอ่อน · 周报 / 统计 / 薄弱点 / 建议</div>
         </div>
         <div class="ec-arrow">→</div>
       </a>
@@ -117,7 +107,7 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=7"></script>
+  <script src="/assets/app.js?v=8"></script>
   <script>
     if (!App.requireLogin()) {
       // 跳走
