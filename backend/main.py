@@ -1,4 +1,4 @@
-import os, io, csv, json, time, hmac, hashlib, ipaddress, secrets, base64
+import os, io, csv, json, re, time, hmac, hashlib, ipaddress, secrets, base64
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -559,6 +559,14 @@ def api_items(request: Request, module: str):
     return {"items": [dict(r) for r in rows]}
 
 
+def _norm_answer(s: str) -> str:
+    """归一化答案用于精确比对：只保留字词，忽略标点、空白、大小写。
+
+    "你好！" / "你好" / " 你好。 " 视为同一个答案。
+    """
+    return re.sub(r"[\W_]+", "", (s or "").lower())
+
+
 @app.post("/api/feedback")
 async def api_feedback(req: FeedbackReq, request: Request):
     student = get_student(parse_token(request))
@@ -573,9 +581,25 @@ async def api_feedback(req: FeedbackReq, request: Request):
     if not item:
         raise HTTPException(404, "item not found")
 
-    t0 = time.time()
-    result = await chat_json(feedback_messages(dict(item), req.input_text, req.module), provider="mm")
-    latency = int((time.time() - t0) * 1000)
+    # 精确匹配 → 秒判，不调 AI。常见答案占大多数，省 20-30 秒且不会失败。
+    # 答得不一样时才交给 AI 判断是否"部分正确"。
+    mine = _norm_answer(req.input_text)
+    std = _norm_answer(item["answer"])
+    if mine and std and mine == std:
+        result = {
+            "verdict": "correct",
+            "error_type": "none",
+            "feedback_th": "ถูกต้อง! ตอบตรงกับที่เรียนมาเลย เก่งมาก",
+            "hint1_th": "", "hint2_th": "",
+            "example_zh": "", "answer_zh": item["answer"] or "",
+            "graded_by": "exact_match",
+        }
+        latency = 0
+    else:
+        t0 = time.time()
+        result = await chat_json(feedback_messages(dict(item), req.input_text, req.module), provider="mm")
+        result.setdefault("graded_by", "ai")
+        latency = int((time.time() - t0) * 1000)
     log_event(student, "input_submit", req.module, req.item_id, req.input_text,
               ai_latency_ms=latency, response_json=result)
     conn = get_conn()

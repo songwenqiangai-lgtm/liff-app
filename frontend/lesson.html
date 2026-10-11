@@ -275,9 +275,9 @@
               <button data-r="not_sure">🤔 ไม่แน่ใจ 不确定</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top: var(--s-5)">${exIdx === items.length - 1 ? "🎉 จบแล้ว 完成！" : "ข้อถัดไป 下一题 →"}</button>`;
+          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top: var(--s-5)">${exIdx === DATA.exercises.length - 1 ? "🎉 จบแล้ว 完成！" : "ข้อถัดไป 下一题 →"}</button>`;
         document.getElementById("btn-next").onclick = () => {
-          exIdx = exIdx === items.length - 1 ? 0 : exIdx + 1;
+          exIdx = exIdx === DATA.exercises.length - 1 ? 0 : exIdx + 1;
           renderModule("exercise"); window.scrollTo({top:0,behavior:'smooth'});
         };
         const HINTS = { 1: r.hint1_th, 2: r.hint2_th, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
