@@ -41,10 +41,10 @@
 <body>
   <div class="app-wrap">
     <div class="home-hero">
-      <img src="/assets/logo.jpg" alt="">
+      <a href="profile.html" style="flex-shrink:0"><img src="/assets/logo.jpg" alt="" id="me-avatar"></a>
       <div class="who">
         <div class="name" id="who">学生</div>
-        <div class="role">สวัสดี · 欢迎回来</div>
+        <div class="role" id="who-sig">สวัสดี · 欢迎回来</div>
       </div>
       <a class="bell" href="notifications.html" title="通知">🔔<span class="dot-badge" id="bell-badge" style="display:none"></span></a>
     </div>
@@ -112,11 +112,24 @@
     if (!App.requireLogin()) {
       // 跳走
     } else {
-      const me = JSON.parse(localStorage.getItem("me_cache") || "null") || { display_name: localStorage.getItem("display_name") || "学生" };
-      document.getElementById("who").textContent = me.display_name;
+      // 先用本地缓存渲染，避免白屏
+      document.getElementById("who").textContent =
+        localStorage.getItem("display_name") || "学生";
       document.getElementById("btn-out").onclick = () => {
         if (confirm("确认退出登录？· ยืนยันออกจากระบบ?")) App.logout();
       };
+      // 拉最新资料（姓名 / 头像 / 签名）
+      App.call("/api/profile").then(me => {
+        document.getElementById("who").textContent = me.display_name || "学生";
+        if (me.signature) {
+          document.getElementById("who-sig").textContent = me.signature;
+        }
+        if (me.avatar_url) {
+          document.getElementById("me-avatar").src = me.avatar_url;
+        }
+        localStorage.setItem("display_name", me.display_name || "");
+        localStorage.setItem("avatar_url", me.avatar_url || "");
+      }).catch(() => {});
       // 未读通知徽标（F6/F8/F12）
       App.call("/api/notifications/unread_count").then(r => {
         if (r && r.unread > 0) {

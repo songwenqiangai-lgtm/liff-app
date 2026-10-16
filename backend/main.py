@@ -420,8 +420,8 @@ class AuthReq(BaseModel):
 
 class LoginReq(BaseModel):
     class_id: str
-    display_name: str
-    student_no: str  # 学号=密码
+    student_no: str
+    password: str
 
 
 class FeedbackReq(BaseModel):
@@ -479,28 +479,35 @@ async def api_auth(req: AuthReq):
 
 @app.post("/api/login")
 def api_login(req: LoginReq):
-    """表单登录：班级 + 姓名 + 学号(密码)。无记录则自动建档。"""
+    """表单登录：班级 + 学号 + 密码。
+
+    首次登录自动建档，**初始密码 = 学号**；建档后学生可在「个人资料」里
+    改密码、改姓名、传头像、写签名。老账号若还没设过 password，回退用学号校验。
+    """
     if req.class_id not in CLASS_CONTENT:
         raise HTTPException(400, "unknown class")
-    name = (req.display_name or "").strip()
     sno = (req.student_no or "").strip()
-    if not name or not sno:
-        raise HTTPException(400, "姓名和学号不能为空")
+    pwd = (req.password or "").strip()
+    if not sno or not pwd:
+        raise HTTPException(400, "学号和密码不能为空")
     conn = get_conn()
     row = conn.execute(
-        "SELECT * FROM students WHERE class_id=? AND display_name=?",
-        (req.class_id, name)).fetchone()
+        "SELECT * FROM students WHERE class_id=? AND student_no=?",
+        (req.class_id, sno)).fetchone()
     if row is not None:
-        # 找到 → 校验学号
-        if (row["student_no"] or "") != sno:
-            raise HTTPException(401, "密码（学号）错误")
+        expected = row["password"] or row["student_no"] or ""
+        if pwd != expected:
+            raise HTTPException(401, "密码错误")
         student = row
     else:
-        # 未找到 → 自动建档
+        # 首次登录：初始密码必须等于学号
+        if pwd != sno:
+            raise HTTPException(401, "首次登录请用学号作为密码")
         track = CLASS_CONTENT[req.class_id]
         cur = conn.execute(
-            "INSERT INTO students(line_user_id,display_name,class_id,track,student_no) VALUES(?,?,?,?,?)",
-            (f"sn-{req.class_id}-{sno}", name, req.class_id, track, sno))
+            """INSERT INTO students(line_user_id,display_name,class_id,track,student_no,password)
+               VALUES(?,?,?,?,?,?)""",
+            (f"sn-{req.class_id}-{sno}", sno, req.class_id, track, sno, sno))
         conn.commit()
         student = conn.execute("SELECT * FROM students WHERE id=?", (cur.lastrowid,)).fetchone()
     # F12：距上次登录超过阈值 → 先写一条温和鼓励通知（必须在本次登录入库前判断）
@@ -529,6 +536,122 @@ def api_login(req: LoginReq):
 def api_me(request: Request):
     sid = parse_token(request)
     return dict(get_student(sid))
+
+
+# ---------- 个人资料 ----------
+
+class ProfileReq(BaseModel):
+    display_name: Optional[str] = None
+    signature: Optional[str] = None
+
+
+class AvatarReq(BaseModel):
+    filename: str = ""
+    file_b64: str
+
+
+class PasswordReq(BaseModel):
+    old_password: str
+    new_password: str
+
+
+def _public_profile(student) -> dict:
+    d = dict(student)
+    d.pop("password", None)      # 密码绝不外传
+    d.pop("line_user_id", None)
+    return d
+
+
+@app.get("/api/profile")
+def api_profile_get(request: Request):
+    return _public_profile(get_student(parse_token(request)))
+
+
+@app.post("/api/profile")
+def api_profile_set(req: ProfileReq, request: Request):
+    """更新姓名 / 个性签名"""
+    student = get_student(parse_token(request))
+    fields, params = [], []
+    if req.display_name is not None:
+        n = req.display_name.strip()
+        if not n:
+            raise HTTPException(400, "姓名不能为空")
+        if len(n) > 40:
+            raise HTTPException(400, "姓名最多 40 个字")
+        fields.append("display_name=?")
+        params.append(n)
+    if req.signature is not None:
+        s = req.signature.strip()
+        if len(s) > 80:
+            raise HTTPException(400, "个性签名最多 80 个字")
+        fields.append("signature=?")
+        params.append(s)
+    if not fields:
+        raise HTTPException(400, "没有要更新的内容")
+    params.append(student["id"])
+    conn = get_conn()
+    conn.execute("UPDATE students SET %s WHERE id=?" % ",".join(fields), params)
+    conn.commit()
+    return {"ok": True, "profile": _public_profile(
+        conn.execute("SELECT * FROM students WHERE id=?", (student["id"],)).fetchone())}
+
+
+@app.post("/api/profile/avatar")
+def api_profile_avatar(req: AvatarReq, request: Request):
+    """上传头像。前端已用 canvas 缩到 256px，这里再校验格式与大小。"""
+    student = get_student(parse_token(request))
+    raw = req.file_b64 or ""
+    if "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except Exception:
+        raise HTTPException(400, "图片数据有误，请重新选择")
+    if not data:
+        raise HTTPException(400, "图片为空")
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(400, "图片太大（请控制在 2MB 内）")
+    if data[:3] == b"\xff\xd8\xff":
+        ext = "jpg"
+    elif data[:8] == b"\x89PNG\r\n\x1a\n":
+        ext = "png"
+    elif data[:3] == b"GIF":
+        ext = "gif"
+    else:
+        raise HTTPException(400, "只支持 JPG / PNG / GIF 图片")
+    d = os.path.join(UPLOAD_DIR, "avatars")
+    os.makedirs(d, exist_ok=True)
+    fname = "av_%d_%d.%s" % (student["id"], int(time.time()), ext)
+    with open(os.path.join(d, fname), "wb") as f:
+        f.write(data)
+    url = "/uploads/avatars/" + fname
+    conn = get_conn()
+    conn.execute("UPDATE students SET avatar_url=? WHERE id=?", (url, student["id"]))
+    conn.commit()
+    log_event(student, "avatar_upload")
+    return {"ok": True, "avatar_url": url}
+
+
+@app.post("/api/profile/password")
+def api_profile_password(req: PasswordReq, request: Request):
+    """改密码，需验证原密码。"""
+    student = get_student(parse_token(request))
+    old = (req.old_password or "").strip()
+    new = (req.new_password or "").strip()
+    expected = student["password"] or student["student_no"] or ""
+    if old != expected:
+        raise HTTPException(401, "原密码错误")
+    if len(new) < 4:
+        raise HTTPException(400, "新密码至少 4 位")
+    if len(new) > 32:
+        raise HTTPException(400, "新密码最多 32 位")
+    if new == old:
+        raise HTTPException(400, "新密码和原密码相同")
+    conn = get_conn()
+    conn.execute("UPDATE students SET password=? WHERE id=?", (new, student["id"]))
+    conn.commit()
+    log_event(student, "password_change")
+    return {"ok": True}
 
 
 @app.get("/api/phase")

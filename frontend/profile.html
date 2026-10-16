@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>โปรไฟล์ของฉัน · 个人资料</title>
+  <link rel="stylesheet" href="/assets/style.css?v=8">
+  <style>
+    .pf-hero { display: flex; flex-direction: column; align-items: center; padding: var(--s-4) 0 var(--s-5); }
+    .pf-avatar { position: relative; width: 96px; height: 96px; }
+    .pf-avatar img { width: 96px; height: 96px; border-radius: 50%; object-fit: cover;
+      box-shadow: var(--sh-2); background: var(--c-primary-l); }
+    .pf-avatar .cam { position: absolute; right: -2px; bottom: -2px; width: 32px; height: 32px;
+      border-radius: 50%; background: var(--c-primary); color: #fff; display: flex;
+      align-items: center; justify-content: center; font-size: 15px;
+      box-shadow: 0 2px 8px rgba(31,138,95,.4); }
+    .pf-hero .sno { margin-top: var(--s-3); font-size: .8rem; color: var(--c-muted); }
+    .pf-hero .sig { margin-top: var(--s-2); font-size: .9rem; color: var(--c-text-2);
+      text-align: center; max-width: 260px; }
+    .pf-label { display: block; font-size: .85rem; color: var(--c-text-2);
+      font-weight: 600; margin: var(--s-4) 0 var(--s-2); }
+    .pf-input { width: 100%; padding: 13px 15px; border: 2px solid var(--c-line-2);
+      border-radius: 14px; font-size: 1rem; font-family: inherit; background: #fff;
+      color: var(--c-text); }
+    .pf-input:focus { outline: none; border-color: var(--c-primary);
+      box-shadow: 0 0 0 4px rgba(31,138,95,.12); }
+    .pf-hint { font-size: .75rem; color: var(--c-muted); margin-top: 6px; }
+    .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
+      background: var(--c-primary-d); color: #fff; padding: 12px 22px; border-radius: 999px;
+      font-size: .9rem; box-shadow: var(--sh-3); opacity: 0; transition: opacity var(--t-norm);
+      pointer-events: none; z-index: 99; }
+    .toast.show { opacity: 1; }
+    .toast.err { background: var(--c-danger); }
+  </style>
+</head>
+<body>
+  <div id="app" class="loading-pulse">
+    <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div>กำลังโหลด... 正在加载</div>
+  </div>
+  <input type="file" id="file" accept="image/*" style="display:none">
+  <div id="toast" class="toast"></div>
+
+  <script src="/assets/app.js?v=8"></script>
+  <script>
+    let ME = null;
+
+    (async () => {
+      if (!App.requireLogin()) return;
+      try { ME = await App.call("/api/profile"); }
+      catch (e) {
+        document.getElementById("app").innerHTML =
+          '<div class="app-wrap"><div class="card">โหลดไม่สำเร็จ · 加载失败</div></div>';
+        return;
+      }
+      render();
+    })();
+
+    function toast(msg, isErr) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.className = "toast show" + (isErr ? " err" : "");
+      clearTimeout(t._t);
+      t._t = setTimeout(() => { t.className = "toast"; }, 2200);
+    }
+
+    function render() {
+      const app = document.getElementById("app");
+      const av = ME.avatar_url
+        ? `<img src="${App.escapeHtml(ME.avatar_url)}" alt="">`
+        : `<img src="/assets/logo.jpg" alt="">`;
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← หน้าหลัก</a>
+          <h1>👤 โปรไฟล์ · 个人资料</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+
+          <div class="pf-hero">
+            <div class="pf-avatar" id="avbox">
+              ${av}
+              <div class="cam">📷</div>
+            </div>
+            <div class="sno">รหัสนักเรียน · 学号 ${App.escapeHtml(ME.student_no || "-")} · ${App.escapeHtml(ME.class_id || "")}</div>
+            <div class="sig" id="sigshow">${App.escapeHtml(ME.signature || "")}</div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">✏️ แก้ไขข้อมูล · 编辑资料</h2>
+            <label class="pf-label">ชื่อที่แสดง · 姓名</label>
+            <input class="pf-input" id="f-name" type="text" maxlength="40"
+                   value="${App.escapeHtml(ME.display_name || "")}" placeholder="输入你的名字">
+            <label class="pf-label">คำแนะนำตัว · 个性签名</label>
+            <input class="pf-input" id="f-sig" type="text" maxlength="80"
+                   value="${App.escapeHtml(ME.signature || "")}" placeholder="写一句鼓励自己的话（可留空）">
+            <div class="pf-hint">最多 80 个字 · ไม่เกิน 80 ตัวอักษร</div>
+            <button class="btn btn-primary btn-block btn-lg" id="btn-save" style="margin-top: var(--s-5)">บันทึก · 保存</button>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">🔒 เปลี่ยนรหัสผ่าน · 修改密码</h2>
+            <label class="pf-label">รหัสเดิม · 原密码</label>
+            <input class="pf-input" id="f-old" type="password" autocomplete="current-password" placeholder="输入现在的密码">
+            <label class="pf-label">รหัสใหม่ · 新密码</label>
+            <input class="pf-input" id="f-new" type="password" autocomplete="new-password" placeholder="至少 4 位">
+            <label class="pf-label">ยืนยันรหัสใหม่ · 确认新密码</label>
+            <input class="pf-input" id="f-new2" type="password" autocomplete="new-password" placeholder="再输一次">
+            <button class="btn btn-secondary btn-block btn-lg" id="btn-pwd" style="margin-top: var(--s-5)">เปลี่ยนรหัสผ่าน · 修改密码</button>
+          </div>
+
+        </div>`;
+
+      document.getElementById("avbox").onclick = () => document.getElementById("file").click();
+      document.getElementById("file").onchange = onPickAvatar;
+      document.getElementById("btn-save").onclick = saveProfile;
+      document.getElementById("btn-pwd").onclick = changePassword;
+    }
+
+    async function saveProfile() {
+      const btn = document.getElementById("btn-save");
+      const name = document.getElementById("f-name").value.trim();
+      const signature = document.getElementById("f-sig").value.trim();
+      if (!name) return toast("姓名不能为空", true);
+      btn.disabled = true; btn.textContent = "保存中...";
+      try {
+        const r = await App.call("/api/profile", {
+          method: "POST", body: JSON.stringify({ display_name: name, signature })
+        });
+        ME = r.profile;
+        localStorage.setItem("display_name", ME.display_name || "");
+        toast("已保存 · บันทึกแล้ว");
+        render();
+      } catch (e) {
+        toast(String(e.message || e).slice(0, 60), true);
+      } finally {
+        btn.disabled = false; btn.textContent = "บันทึก · 保存";
+      }
+    }
+
+    async function changePassword() {
+      const btn = document.getElementById("btn-pwd");
+      const oldp = document.getElementById("f-old").value.trim();
+      const np = document.getElementById("f-new").value.trim();
+      const np2 = document.getElementById("f-new2").value.trim();
+      if (!oldp) return toast("请输入原密码", true);
+      if (np.length < 4) return toast("新密码至少 4 位", true);
+      if (np !== np2) return toast("两次输入的新密码不一致", true);
+      btn.disabled = true; btn.textContent = "修改中...";
+      try {
+        await App.call("/api/profile/password", {
+          method: "POST", body: JSON.stringify({ old_password: oldp, new_password: np })
+        });
+        toast("密码已修改 · 下次请用新密码登录");
+        document.getElementById("f-old").value = "";
+        document.getElementById("f-new").value = "";
+        document.getElementById("f-new2").value = "";
+      } catch (e) {
+        toast(String(e.message || e).slice(0, 60), true);
+      } finally {
+        btn.disabled = false; btn.textContent = "เปลี่ยนรหัสผ่าน · 修改密码";
+      }
+    }
+
+    // 选图后先用 canvas 缩到 256×256 再上传，省流量也避免超过 2MB 上限
+    function onPickAvatar(ev) {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!f) return;
+      if (!/^image\//.test(f.type)) return toast("请选择图片文件", true);
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = async () => {
+          const S = 256;
+          const c = document.createElement("canvas");
+          c.width = S; c.height = S;
+          const ctx = c.getContext("2d");
+          // 居中裁成正方形
+          const m = Math.min(img.width, img.height);
+          ctx.drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, S, S);
+          const b64 = c.toDataURL("image/jpeg", 0.85).split(",")[1];
+          toast("上传中...");
+          try {
+            const r = await App.call("/api/profile/avatar", {
+              method: "POST", body: JSON.stringify({ filename: f.name, file_b64: b64 })
+            });
+            ME.avatar_url = r.avatar_url;
+            toast("头像已更新");
+            render();
+          } catch (e) {
+            toast(String(e.message || e).slice(0, 60), true);
+          }
+        };
+        img.onerror = () => toast("图片读取失败", true);
+        img.src = reader.result;
+      };
+      reader.onerror = () => toast("图片读取失败", true);
+      reader.readAsDataURL(f);
+    }
+  </script>
+</body>
+</html>

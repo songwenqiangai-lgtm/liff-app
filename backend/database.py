@@ -211,6 +211,10 @@ def _migrate(conn):
     add_col("assessments", "task_source", "TEXT DEFAULT 'ai'")
     add_col("feedback_events", "decision_reason_id", "INTEGER")
     add_col("handoff_events", "auto_triggered", "INTEGER DEFAULT 0")
+    # 学生个人资料：密码（初始=学号）、头像、个性签名
+    add_col("students", "password", "TEXT")
+    add_col("students", "avatar_url", "TEXT")
+    add_col("students", "signature", "TEXT")
     conn.commit()
 
 

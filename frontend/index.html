@@ -42,7 +42,7 @@
 
     <div class="login-hero">
       <div class="login-title">สวัสดี 欢迎回来 👋</div>
-      <div class="login-sub">选择班级 · 输入姓名和学号登录</div>
+      <div class="login-sub">选择班级 · 输入学号和密码登录</div>
     </div>
 
     <!-- 吉祥物挥手 -->
@@ -86,18 +86,18 @@
         <option value="M6/2">M6/2 · 初三文科</option>
       </select>
 
-      <label>ชื่อ · 姓名</label>
-      <input id="name" type="text" placeholder="พิมพ์ชื่อของคุณ 输入姓名" autocomplete="off">
+      <label>รหัสนักเรียน · 学号</label>
+      <input id="sno" type="text" placeholder="กรอกรหัสนักเรียน 输入学号" autocomplete="username">
 
-      <label>รหัสนักเรียน · 学号（密码）</label>
-      <input id="sno" type="password" placeholder="กรอกรหัสนักเรียน 输入学号" autocomplete="off">
+      <label>รหัสผ่าน · 密码</label>
+      <input id="pwd" type="password" placeholder="รหัสผ่าน 输入密码" autocomplete="current-password">
 
       <button class="btn btn-primary btn-block btn-xl" id="btn-login" style="margin-top: var(--s-5)">เข้าสู่ระบบ 登录</button>
       <button class="btn btn-ghost btn-block" id="btn-dev" style="margin-top: var(--s-3); font-size: .85rem; color: var(--c-muted)">调试入口（/dev/ 后门）</button>
     </div>
 
     <p class="muted" style="text-align:center; margin-top: var(--s-4); font-size: .8rem">
-      💡 首次登录系统会自动为你建档<br>首次登录会创建你的学习记录
+      💡 首次登录：密码和学号相同<br>เข้าครั้งแรก: รหัสผ่านเหมือนรหัสนักเรียน
     </p>
   </div>
 
@@ -112,27 +112,28 @@
     $("btn-login").onclick = async () => {
       clearErr();
       const class_id = $("class").value;
-      const display_name = $("name").value.trim();
       const student_no = $("sno").value.trim();
+      const password = $("pwd").value.trim();
       if (!class_id) return showErr("请选择班级 / กรุณาเลือกบทเรียน");
-      if (!display_name) return showErr("请填写姓名 / กรุณากรอกชื่อ");
-      if (!student_no) return showErr("请填写学号（密码）/ กรุณากรอกรหัสนักเรียน");
+      if (!student_no) return showErr("请填写学号 / กรุณากรอกรหัสนักเรียน");
+      if (!password) return showErr("请填写密码 / กรุณากรอกรหัสผ่าน");
       $("btn-login").disabled = true; $("btn-login").textContent = "登录中...";
       try {
         const r = await fetch("/api/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ class_id, display_name, student_no })
+          body: JSON.stringify({ class_id, student_no, password })
         });
         if (!r.ok) {
-          const t = await r.text();
-          throw new Error(t.includes("密码") || t.includes("401") ? "学号（密码）错误，请重试" : t);
+          let msg = "登录失败，请重试";
+          try { msg = (await r.json()).detail || msg; } catch (e) {}
+          throw new Error(msg);
         }
         const data = await r.json();
         localStorage.setItem("session_token", data.token);
         localStorage.setItem("class_id", data.student.class_id);
         localStorage.setItem("track", data.student.track);
-        localStorage.setItem("display_name", data.student.display_name);
+        localStorage.setItem("display_name", data.student.display_name || "");
         location.href = "home.html";
       } catch (e) {
         showErr(typeof e.message === "string" ? e.message : "登录失败");
