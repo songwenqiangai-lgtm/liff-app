@@ -49,7 +49,7 @@
       <a class="bell" href="notifications.html" title="通知">🔔<span class="dot-badge" id="bell-badge" style="display:none"></span></a>
     </div>
 
-    <div class="entry-grid">
+    <div class="entry-grid" id="l2-entries">
       <a class="entry-card ask" href="ask.html">
         <div class="ec-icon">💬</div>
         <div class="ec-text">
@@ -87,6 +87,64 @@
       </a>
     </div>
 
+    <!-- 中文班（母语语文）入口 -->
+    <div class="entry-grid" id="zh-entries" style="display:none">
+      <a class="entry-card" href="homework.html" style="position:relative">
+        <div class="ec-icon" style="background:linear-gradient(135deg,#d9772e,#b85c1a);box-shadow:0 4px 12px rgba(217,119,46,.25)">📝</div>
+        <div class="ec-text">
+          <div class="ec-zh">今日作业</div>
+          <div class="ec-th" id="hw-sub">查看老师布置的作业</div>
+        </div>
+        <div class="ec-arrow">→</div>
+        <span id="hw-badge" style="display:none;position:absolute;top:10px;right:44px;background:#d64545;color:#fff;border-radius:999px;font-size:.7rem;padding:2px 7px"></span>
+      </a>
+
+      <a class="entry-card lessons" href="lessons.html">
+        <div class="ec-icon">📚</div>
+        <div class="ec-text">
+          <div class="ec-zh">课程学习</div>
+          <div class="ec-th">统编版六年级上册 · 按单元学习</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card" href="poems.html">
+        <div class="ec-icon" style="background:linear-gradient(135deg,#8a5a2b,#6b431e);box-shadow:0 4px 12px rgba(138,90,43,.25)">🏮</div>
+        <div class="ec-text">
+          <div class="ec-zh">每日积累</div>
+          <div class="ec-th">古诗文背诵与默写</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card" href="errors.html">
+        <div class="ec-icon" style="background:linear-gradient(135deg,#c05a5a,#9c3f3f);box-shadow:0 4px 12px rgba(192,90,90,.25)">📕</div>
+        <div class="ec-text">
+          <div class="ec-zh">错题本</div>
+          <div class="ec-th">错字、错题集中复习</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card ask" href="ask.html">
+        <div class="ec-icon">💬</div>
+        <div class="ec-text">
+          <div class="ec-zh">AI 小老师</div>
+          <div class="ec-th">问字词、问阅读、问作文思路</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+
+      <a class="entry-card report" href="report.html">
+        <div class="ec-icon">📈</div>
+        <div class="ec-text">
+          <div class="ec-zh">我的成长</div>
+          <div class="ec-th">周报 · 五维能力 · 薄弱点</div>
+        </div>
+        <div class="ec-arrow">→</div>
+      </a>
+    </div>
+
     <div class="home-mascot">
       <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
         <circle cx="50" cy="50" r="46" fill="#fff" stroke="#1f8a5f" stroke-width="3"/>
@@ -109,26 +167,48 @@
 
   <script src="/assets/app.js?v=8"></script>
   <script>
+    function applyMode(mode) {
+      const native = mode === "native";
+      document.getElementById("l2-entries").style.display = native ? "none" : "flex";
+      document.getElementById("zh-entries").style.display = native ? "flex" : "none";
+      if (native) {
+        App.call("/api/homework").then(r => {
+          const pending = (r.assignments || []).filter(a => a.status === "pending").length;
+          const badge = document.getElementById("hw-badge");
+          if (pending) {
+            badge.textContent = pending > 99 ? "99+" : pending;
+            badge.style.display = "inline-block";
+          }
+          document.getElementById("hw-sub").textContent =
+            pending ? `有 ${pending} 项待完成` : "查看老师布置的作业";
+        }).catch(() => {});
+      }
+    }
     if (!App.requireLogin()) {
       // 跳走
     } else {
       // 先用本地缓存渲染，避免白屏
       document.getElementById("who").textContent =
         localStorage.getItem("display_name") || "学生";
+      applyMode(localStorage.getItem("ui_mode") || "l2");
       document.getElementById("btn-out").onclick = () => {
         if (confirm("确认退出登录？· ยืนยันออกจากระบบ?")) App.logout();
       };
-      // 拉最新资料（姓名 / 头像 / 签名）
-      App.call("/api/profile").then(me => {
+      // 拉最新资料（姓名 / 头像 / 签名 / 界面模式）
+      App.call("/api/me").then(me => {
         document.getElementById("who").textContent = me.display_name || "学生";
         if (me.signature) {
           document.getElementById("who-sig").textContent = me.signature;
+        } else if (me.ui_mode === "native") {
+          document.getElementById("who-sig").textContent = "欢迎回来，今天也要加油哦";
         }
         if (me.avatar_url) {
           document.getElementById("me-avatar").src = me.avatar_url;
         }
         localStorage.setItem("display_name", me.display_name || "");
         localStorage.setItem("avatar_url", me.avatar_url || "");
+        localStorage.setItem("ui_mode", me.ui_mode || "l2");
+        applyMode(me.ui_mode || "l2");
       }).catch(() => {});
       // 未读通知徽标（F6/F8/F12）
       App.call("/api/notifications/unread_count").then(r => {

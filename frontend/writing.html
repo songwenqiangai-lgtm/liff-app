@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>习作 · 中文六年级</title>
+  <link rel="stylesheet" href="/assets/style.css?v=8">
+  <style>
+    #w-content { width:100%; padding:12px; border-radius:12px; border:1px solid var(--c-line-2);
+      line-height:1.9; font-size:1rem; font-family:"Noto Sans SC",sans-serif; min-height:300px; }
+    .task-row { display:block; padding:16px; margin:0 var(--s-4) 12px; background:#fff;
+      border-radius:var(--r-lg); box-shadow:var(--sh-1); text-decoration:none; color:inherit;
+      border-left:4px solid #c88a3e; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <a class="back" href="home.html">← 返回</a>
+    <h1>✍️ 习作</h1>
+    <div style="width:40px"></div>
+  </div>
+  <div id="app" class="app-wrap fade-in"></div>
+  <script src="/assets/app.js?v=8"></script>
+  <script>
+    if (!App.requireLogin()) { /* redirect */ }
+    else {
+      const TASK_ID = new URLSearchParams(location.search).get("task_id");
+      if (TASK_ID) loadTask(parseInt(TASK_ID)); else loadList();
+    }
+
+    async function loadList() {
+      const app = document.getElementById("app");
+      let tasks = [];
+      try { tasks = (await App.call("/api/writing/tasks")).tasks || []; }
+      catch (e) { app.innerHTML = '<div class="card">加载失败</div>'; return; }
+      if (!tasks.length) { app.innerHTML = '<div class="card" style="text-align:center">还没有习作任务</div>'; return; }
+      app.innerHTML = tasks.map(t => `
+        <a class="task-row" href="writing.html?task_id=${t.id}">
+          <div class="muted" style="font-size:.78rem">第${t.unit || "?"}单元 · 不少于 ${t.min_words || 400} 字</div>
+          <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(t.title)}</div>
+          <div class="muted" style="font-size:.82rem;margin-top:4px">${App.escapeHtml((t.prompt || "").slice(0, 40))}...</div>
+        </a>`).join("");
+    }
+
+    async function loadTask(tid) {
+      const app = document.getElementById("app");
+      let data;
+      try { data = await App.call("/api/writing/task/" + tid); }
+      catch (e) { app.innerHTML = '<div class="card">任务加载失败</div>'; return; }
+      const t = data.task;
+      const mine = data.mine || [];
+      const latest = mine.filter(x => x.draft_no === 1).slice(-1)[0];
+      const draftText = latest && latest.status === "draft" ? "" : "";
+      app.innerHTML = `
+        <div class="card fade-in">
+          <h2 class="t-cn" style="font-size:1.15rem">${App.escapeHtml(t.title)}</h2>
+          <div class="muted" style="font-size:.85rem;margin-top:4px">第${t.unit}单元 · 不少于 ${t.min_words || 400} 字</div>
+          <div class="t-cn" style="margin-top:12px;line-height:1.9;white-space:pre-wrap">${App.escapeHtml(t.prompt || "")}</div>
+          ${t.requirements ? `<div class="explain-box" style="margin-top:10px"><b>写作要求</b><br>${App.escapeHtml(t.requirements)}</div>` : ""}
+          ${(t.tips || []).length ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">写作提示</summary>
+            <div style="margin-top:8px;font-size:.88rem;line-height:1.9">${t.tips.map(x => "· " + App.escapeHtml(x)).join("<br>")}</div></details>` : ""}
+        </div>
+        <div class="card fade-in" style="margin-top:12px">
+          <textarea id="w-content" placeholder="在这里写作文..."></textarea>
+          <div style="display:flex;justify-content:space-between;margin-top:6px">
+            <span class="muted" style="font-size:.8rem" id="w-count">0 字</span>
+            <span class="muted" style="font-size:.8rem" id="w-save"></span>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn btn-secondary" id="w-draft" style="flex:1">保存草稿</button>
+            <button class="btn btn-primary" id="w-submit" style="flex:2">提交让 AI 批改</button>
+          </div>
+          <div id="w-result"></div>
+        </div>
+        ${mine.length ? `<div class="card" style="margin-top:12px"><b>历史稿次</b>${mine.map(m => `
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--c-line);font-size:.85rem">
+            <span>第 ${m.draft_no} 稿 · ${m.word_count || 0} 字 · ${m.status}</span>
+            <span class="muted">${(m.created_at || "").slice(0, 16)}</span>
+          </div>`).join("")}</div>` : ""}`;
+
+      const ta = document.getElementById("w-content");
+      const cnt = () => {
+        const n = (ta.value || "").replace(/[\s，。！？、；：""''（）,.!?;:]/g, "").length;
+        document.getElementById("w-count").textContent = n + " 字";
+        return n;
+      };
+      ta.oninput = cnt;
+
+      document.getElementById("w-draft").onclick = async () => {
+        try {
+          await App.call("/api/writing/save", { method: "POST",
+            body: JSON.stringify({ task_id: tid, content: ta.value, draft_no: 1 }) });
+          document.getElementById("w-save").textContent = "✅ 草稿已保存 " + new Date().toLocaleTimeString();
+        } catch (e) { document.getElementById("w-save").textContent = "保存失败"; }
+      };
+
+      document.getElementById("w-submit").onclick = async () => {
+        const n = cnt();
+        if (n < 50) { alert("作文还太短，再写一些吧"); return; }
+        if (n < (t.min_words || 400) * 0.8 && !confirm(`现在只有 ${n} 字，要求不少于 ${t.min_words || 400} 字，确定提交吗？`)) return;
+        const btn = document.getElementById("w-submit");
+        btn.disabled = true; btn.textContent = "AI 老师批改中，约需 20 秒...";
+        try {
+          const r = await App.call("/api/writing/submit", { method: "POST",
+            body: JSON.stringify({ task_id: tid, content: ta.value, draft_no: 1 }) });
+          if (!r.feedback) {
+            document.getElementById("w-result").innerHTML =
+              '<div class="feedback-box partial" style="margin-top:12px">作文已提交，AI 批改暂时不可用，老师会尽快批阅。</div>';
+          } else {
+            renderFeedback(r.feedback);
+          }
+        } catch (e) {
+          document.getElementById("w-result").innerHTML = '<div class="feedback-box error-text" style="margin-top:12px">提交失败，请重试</div>';
+        } finally { btn.disabled = false; btn.textContent = "提交让 AI 批改"; }
+      };
+    }
+
+    function renderFeedback(fb) {
+      const s = fb.scores || {};
+      const dims = ["内容", "结构", "语言", "规范"];
+      document.getElementById("w-result").innerHTML = `
+        <div class="card fade-in" style="margin-top:14px;background:var(--c-primary-l)">
+          <div style="font-size:2rem;font-weight:800;color:var(--c-primary-d);text-align:center">${s["总分"] || "-"} 分</div>
+          <div style="display:flex;justify-content:space-around;margin-top:10px;font-size:.85rem">
+            ${dims.map(d => `<span>${d} ${s[d] != null ? s[d] : "-"}</span>`).join("")}
+          </div>
+        </div>
+        ${(fb.highlights || []).length ? `<div class="explain-box" style="margin-top:10px"><b>✨ 亮点</b><br>${fb.highlights.map(h => App.escapeHtml(h)).join("<br>")}</div>` : ""}
+        ${(fb.suggestions || []).length ? `<div class="card" style="margin-top:10px"><b>修改建议</b>
+          ${fb.suggestions.map((x, i) => `<div style="margin-top:10px;padding:10px;border-left:3px solid var(--c-primary);background:#fafafa;border-radius:6px">
+            ${x.quote ? `<div style="font-size:.85rem;color:var(--c-muted)">「${App.escapeHtml(x.quote)}」</div>` : ""}
+            <div style="margin-top:4px">${i + 1}. ${App.escapeHtml(x.advice)}</div>
+          </div>`).join("")}</div>` : ""}
+        ${fb.overall ? `<div class="explain-box" style="margin-top:10px"><b>总评</b><br>${App.escapeHtml(fb.overall)}</div>` : ""}
+        <p class="muted" style="font-size:.8rem;margin-top:10px;text-align:center">根据建议修改后，可以再交一稿。</p>`;
+    }
+  </script>
+</body>
+</html>

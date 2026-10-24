@@ -16,6 +16,9 @@
     const MODULE_LABELS = { pattern: "句型", vocab: "词汇", chat: "会话", writing: "写作" };
     let RPT = null, DIAG = null, SUGG = null, RADAR = null;
 
+    if (localStorage.getItem("ui_mode") === "native") {
+      nativeReport();
+    } else {
     (async () => {
       if (!App.requireLogin()) return;
       const app = document.getElementById("app");
@@ -33,6 +36,74 @@
       }
       render();
     })();
+    }
+
+    async function nativeReport() {
+      if (!App.requireLogin()) return;
+      const app = document.getElementById("app");
+      let r;
+      try {
+        r = await App.call("/api/native_report");
+      } catch (e) {
+        app.innerHTML = '<div class="app-wrap"><div class="card">加载失败，请稍后重试</div></div>';
+        return;
+      }
+      const dims = r.radar || [];
+      const wp = r.weak_points || [];
+      const hw = r.homework || {};
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← 返回</a>
+          <h1>📈 我的成长</h1>
+          <a class="bell" href="notifications.html">🔔</a>
+        </div>
+        <div class="app-wrap fade-in">
+          <div class="report-hero">
+            <div class="rh-lbl">本周学习报告</div>
+            <div class="rh-lbl" style="margin-top:var(--s-4)">作业完成率</div>
+            <div class="rh-big">${hw.rate == null ? "—" : hw.rate + "%"}</div>
+            <div class="rh-lbl">${r.week_start} ~ ${r.week_end}</div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">📊 本周概览</h2>
+            <div class="metric-row"><span class="m-name">听写次数 / 正确率</span>
+              <span class="m-val">${r.dictation.count} 次 / ${r.dictation.accuracy == null ? "—" : r.dictation.accuracy + "%"}</span></div>
+            <div class="metric-row"><span class="m-name">练习提交 / 正确率</span>
+              <span class="m-val">${r.submissions.graded} 题 / ${r.submissions.accuracy == null ? "—" : r.submissions.accuracy + "%"}</span></div>
+            <div class="metric-row"><span class="m-name">背诵默写</span>
+              <span class="m-val">${r.recitation.count} 次${r.recitation.avg_score != null ? " / 平均 " + r.recitation.avg_score + " 分" : ""}</span></div>
+            <div class="metric-row"><span class="m-name">习作提交</span>
+              <span class="m-val">${r.writing.count} 篇${r.writing.avg_score != null ? " / 平均 " + r.writing.avg_score + " 分" : ""}</span></div>
+            <div class="metric-row"><span class="m-name">作业完成</span>
+              <span class="m-val">${hw.done} / ${hw.total}</span></div>
+            <div class="metric-row"><span class="m-name">学习天数</span>
+              <span class="m-val">${r.active_days} 天</span></div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">🕸️ 语文能力</h2>
+            <div class="radar-wrap">${dims.length ? radarSvg(dims) : '<p class="muted">暂无数据</p>'}</div>
+            <div class="radar-legend">
+              ${dims.map(d => `<span>${App.escapeHtml(d.label)} <b>${d.value == null ? "—" : d.value}</b></span>`).join("")}
+            </div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-bottom: var(--s-2)">🎯 薄弱点</h2>
+            ${wp.length ? wp.map((p, i) => `
+              <div class="weak-item">
+                <div class="w-rank">${i + 1}</div>
+                <div class="w-main">
+                  <div class="w-point">${App.escapeHtml(p.knowledge_tag || p.q_type || "错题")}</div>
+                  <div class="w-module">${App.escapeHtml(p.q_type || "")}</div>
+                </div>
+                <div class="w-count">×${p.n}</div>
+              </div>`).join("")
+              : '<p class="muted">暂未发现明显薄弱点，继续加油</p>'}
+          </div>
+        </div>`;
+    }
 
     function deltaHtml(v, unit) {
       if (v === null || v === undefined || v === 0) return "";

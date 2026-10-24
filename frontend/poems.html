@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>每日积累 · 古诗文</title>
+  <link rel="stylesheet" href="/assets/style.css?v=8">
+  <style>
+    .poem-body { font-size:1.1rem; line-height:2.1; text-align:center; white-space:pre-wrap;
+      font-family:"Noto Sans SC",sans-serif; margin:14px 0; }
+    details summary { cursor:pointer; font-weight:600; color:var(--c-text-2); }
+    .poem-card { margin-bottom:14px; }
+    .score-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:.72rem;
+      background:var(--c-primary-l); color:var(--c-primary-d); font-weight:700; }
+    .score-pill.none { background:#f1f1f1; color:#888; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <a class="back" href="home.html">← 返回</a>
+    <h1>🏮 古诗文积累</h1>
+    <div style="width:40px"></div>
+  </div>
+  <div id="app" class="app-wrap fade-in loading-pulse" style="text-align:center;padding-top:40px">正在加载...</div>
+  <script src="/assets/app.js?v=8"></script>
+  <script>
+    if (!App.requireLogin()) { /* redirect */ } else { load(); }
+
+    const CN = ["", "一", "二", "三", "四", "五", "六", "七", "八"];
+
+    async function load() {
+      const app = document.getElementById("app");
+      let poems = [];
+      try { poems = (await App.call("/api/poems")).poems || []; }
+      catch (e) { app.innerHTML = '<div class="card">加载失败，请稍后重试</div>'; return; }
+      if (!poems.length) { app.innerHTML = '<div class="card" style="text-align:center">还没有古诗文内容</div>'; return; }
+      const groups = {};
+      poems.forEach(p => (groups[p.unit || 0] = groups[p.unit || 0] || []).push(p));
+      app.innerHTML = Object.keys(groups).sort((a, b) => a - b).map(u => `
+        <h2 style="margin:16px var(--s-4) 8px;font-size:1rem;color:var(--c-muted)">第${CN[u] || u}单元</h2>
+        ${groups[u].map((p, ji) => {
+          const idx = poems.indexOf(p);
+          const best = p.best_score;
+          return `<div class="card poem-card fade-in" data-i="${idx}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div>
+                <div style="font-weight:700;font-size:1.08rem" class="t-cn">${App.escapeHtml(p.title)}</div>
+                <div class="muted" style="font-size:.8rem">${App.escapeHtml([p.dynasty, p.author].filter(Boolean).join(" · "))}</div>
+              </div>
+              <span class="score-pill ${best == null ? "none" : ""}">${best == null ? "未背诵" : "最高 " + Math.round(best) + " 分"}</span>
+            </div>
+            <div class="poem-body t-cn">${App.escapeHtml(p.body)}</div>
+            <button class="btn btn-secondary btn-block" data-say="${idx}">🔊 朗读</button>
+            ${(p.notes || []).length ? `<details style="margin-top:12px"><summary>注释</summary>
+              <div style="margin-top:8px;font-size:.88rem;line-height:1.8">${p.notes.map(n =>
+                `<div><b>${App.escapeHtml(n.word || "")}</b>：${App.escapeHtml(n.note || "")}</div>`).join("")}</div></details>` : ""}
+            ${p.translation ? `<details style="margin-top:8px"><summary>译文</summary>
+              <div style="margin-top:8px;font-size:.9rem;line-height:1.9">${App.escapeHtml(p.translation)}</div></details>` : ""}
+            <div style="margin-top:14px">
+              <b style="font-size:.92rem">默写检测</b>
+              <p class="muted" style="font-size:.76rem;margin:4px 0 6px">不看原文，完整默写（标点可不写）。</p>
+              <textarea id="dt-${idx}" rows="4" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--c-line-2)" placeholder="在这里默写..."></textarea>
+              <button class="btn btn-primary btn-block" data-check="${idx}" style="margin-top:8px">提交默写</button>
+              <div id="pf-${idx}"></div>
+            </div>
+          </div>`;
+        }).join("")}`).join("");
+
+      app.querySelectorAll("[data-say]").forEach(b => b.onclick = () => {
+        App.speak(poems[parseInt(b.dataset.say)].body);
+      });
+      app.querySelectorAll("[data-check]").forEach(b => {
+        const idx = parseInt(b.dataset.check);
+        const p = poems[idx];
+        b.onclick = async () => {
+          const text = document.getElementById("dt-" + idx).value.trim();
+          if (!text) { alert("请先默写"); return; }
+          b.disabled = true; b.textContent = "批改中...";
+          try {
+            const r = await App.call("/api/recitation/submit", { method: "POST",
+              body: JSON.stringify({ poem_id: p.id, mode: "full_dictation", input_text: text }) });
+            document.getElementById("pf-" + idx).innerHTML = `
+              <div class="feedback-box ${r.score >= 80 ? "correct" : "partial"}" style="margin-top:10px">
+                <div class="verdict-badge ${r.score >= 80 ? "correct" : "partial"}">得分 ${r.score}</div>
+                ${(r.detail.missing_chars || []).length
+                  ? `<div style="margin-top:6px">漏写或写错的字：<b>${r.detail.missing_chars.map(c => App.escapeHtml(c)).join(" ")}</b></div>`
+                  : "<div>默写完整，很棒！</div>"}
+              </div>`;
+            p.best_score = Math.max(p.best_score || 0, r.score);
+          } catch (e) {
+            document.getElementById("pf-" + idx).innerHTML = '<div class="feedback-box error-text">提交失败，请重试</div>';
+          } finally { b.disabled = false; b.textContent = "提交默写"; }
+        };
+      });
+    }
+  </script>
+</body>
+</html>

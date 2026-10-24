@@ -19,7 +19,8 @@
       { code: "en", label: "English 英语", rec: "en-US" },
       { code: "zh", label: "中文", rec: "zh-CN" },
     ];
-    let history = [], lang = "th", recorder = null;
+    const NATIVE = localStorage.getItem("ui_mode") === "native";
+    let history = [], lang = NATIVE ? "zh" : "th", recorder = null;
 
     (async () => {
       if (!App.requireLogin()) return;
@@ -30,24 +31,24 @@
       const app = document.getElementById("app");
       app.innerHTML = `
         <div class="top-bar">
-          <a class="back" href="/">← กลับ 返回</a>
-          <h1>💬 ถามครู AI · 询问 AI</h1>
+          <a class="back" href="home.html">← 返回</a>
+          <h1>💬 ${NATIVE ? "AI 小老师" : "ถามครู AI · 询问 AI"}</h1>
           <div style="width:40px"></div>
         </div>
         <div class="app-wrap fade-in chat-shell">
-          <div class="lang-pills">
+          ${NATIVE ? "" : `<div class="lang-pills">
             ${LANGS.map(l => `<button class="lang-pill ${l.code === lang ? 'active' : ''}" data-lang="${l.code}">${l.label}</button>`).join("")}
-          </div>
+          </div>`}
           <div class="chat-stream" id="chat">
-            ${history.length === 0 ? '<div class="muted" style="text-align:center;padding: var(--s-7) 0">พิมพ์คำถามของคุณเริ่มได้เลย<br>用泰/英/中文提问，AI 回答你</div>' : ""}
+            ${history.length === 0 ? `<div class="muted" style="text-align:center;padding: var(--s-7) 0">${NATIVE ? "有不懂的字词、句子、阅读题、作文思路，都可以问我" : "พิมพ์คำถามของคุณเริ่มได้เลย<br>用泰/英/中文提问，AI 回答你"}</div>` : ""}
             ${history.map(m => renderMsg(m)).join("")}
           </div>
           <div class="chat-toolbar">
             <div class="exercise-input">
-              <textarea id="ask-input" placeholder="พิมพ์คำถาม... 泰/英/中" rows="2"></textarea>
+              <textarea id="ask-input" placeholder="${NATIVE ? "输入你的问题..." : "พิมพ์คำถาม... 泰/英/中"}" rows="2"></textarea>
               <div class="exercise-input-row">
-                <button class="btn btn-secondary" id="btn-mic">🎤 พูด 语音</button>
-                <button class="btn btn-primary btn-lg" id="btn-send">ส่ง 发送</button>
+                <button class="btn btn-secondary" id="btn-mic">🎤 ${NATIVE ? "语音" : "พูด 语音"}</button>
+                <button class="btn btn-primary btn-lg" id="btn-send">${NATIVE ? "发送" : "ส่ง 发送"}</button>
               </div>
             </div>
           </div>
@@ -63,7 +64,7 @@
 
     function renderMsg(m) {
       return `<div class="chat-msg ${m.role}">
-        <div class="role">${m.role === "me" ? "คุณ" : "ครู AI"}</div>
+        <div class="role">${m.role === "me" ? (NATIVE ? "我" : "คุณ") : (NATIVE ? "AI 小老师" : "ครู AI")}</div>
         <div class="text">${App.escapeHtml(m.text)}</div>
       </div>`;
     }

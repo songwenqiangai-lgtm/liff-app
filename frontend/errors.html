@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>错题本 · 中文六年级</title>
+  <link rel="stylesheet" href="/assets/style.css?v=8">
+  <style>
+    .err-row { background:#fff; border-radius:var(--r-md); padding:14px; margin-bottom:10px;
+      box-shadow:var(--sh-1); }
+    .err-tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.7rem;
+      background:#fdf1e6; color:#b85c1a; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <a class="back" href="home.html">← 返回</a>
+    <h1>📕 错题本</h1>
+    <div style="width:40px"></div>
+  </div>
+  <div id="app" class="app-wrap fade-in loading-pulse" style="text-align:center;padding-top:40px">正在加载...</div>
+  <script src="/assets/app.js?v=8"></script>
+  <script>
+    if (!App.requireLogin()) { /* redirect */ } else { load(); }
+
+    const SOURCE_LABEL = { exercise: "练习", exam: "测验", dictation: "听写", recitation: "默写" };
+
+    async function load() {
+      const app = document.getElementById("app");
+      let rows = [];
+      try { rows = (await App.call("/api/errors")).errors || []; }
+      catch (e) { app.innerHTML = '<div class="card">加载失败</div>'; return; }
+      if (!rows.length) {
+        app.innerHTML = `<div class="card" style="text-align:center;padding:32px">
+          <div style="font-size:2rem">🌟</div>
+          <div style="margin-top:8px">错题本是空的</div>
+          <div class="muted" style="font-size:.85rem;margin-top:4px">做错的题和字词会自动收集到这里</div>
+        </div>`;
+        return;
+      }
+      const groups = {};
+      rows.forEach(r => {
+        const k = r.q_type || (r.ref && r.ref.q_type) || SOURCE_LABEL[r.source] || "其他";
+        (groups[k] = groups[k] || []).push(r);
+      });
+      app.innerHTML = Object.entries(groups).map(([k, list]) => `
+        <h2 style="margin:16px var(--s-4) 8px;font-size:.95rem;color:var(--c-muted)">${App.escapeHtml(k)}（${list.length}）</h2>
+        <div style="padding:0 var(--s-4)">
+        ${list.map(r => `
+          <div class="err-row fade-in">
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <span class="err-tag">${SOURCE_LABEL[r.source] || r.source} · 错 ${r.wrong_count} 次</span>
+              <span class="muted" style="font-size:.72rem">${(r.last_wrong_at || "").slice(0, 10)}</span>
+            </div>
+            <div class="t-cn" style="margin-top:8px;line-height:1.7">${App.escapeHtml((r.ref && r.ref.text) || "（内容已删除）")}</div>
+            ${r.ref && r.ref.pinyin ? `<div class="muted" style="font-size:.8rem">${App.escapeHtml(r.ref.pinyin)}</div>` : ""}
+            ${r.ref && r.ref.words ? `<div style="font-size:.82rem;margin-top:2px">组词：${App.escapeHtml(r.ref.words)}</div>` : ""}
+            <div style="display:flex;gap:8px;margin-top:10px">
+              ${r.ref && r.ref.href ? `<a class="btn btn-secondary btn-sm" href="${r.ref.href}" style="flex:1;text-align:center">去重练</a>` : ""}
+              <button class="btn btn-ghost btn-sm" data-master="${r.id}" style="flex:1">已经掌握</button>
+            </div>
+          </div>`).join("")}
+        </div>`).join("");
+      app.querySelectorAll("[data-master]").forEach(b => b.onclick = async () => {
+        b.disabled = true; b.textContent = "处理中...";
+        try {
+          await App.call("/api/errors/" + b.dataset.master + "/master", { method: "POST", body: "{}" });
+          b.textContent = "✅ 已掌握";
+          setTimeout(() => location.reload(), 500);
+        } catch (e) { b.disabled = false; b.textContent = "已经掌握"; }
+      });
+    }
+  </script>
+</body>
+</html>

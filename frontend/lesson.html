@@ -51,7 +51,10 @@
         app.innerHTML = '<div class="app-wrap"><div class="card"><p class="muted">โหลดข้อมูลไม่สำเร็จ</p></div></div>';
         return;
       }
-      if (MODULE) renderModule(MODULE);
+      if (DATA.ui_mode === "native") {
+        if (MODULE) renderNativeModule(MODULE);
+        else renderNativeGrid();
+      } else if (MODULE) renderModule(MODULE);
       else renderGrid();
     })();
 
@@ -470,6 +473,660 @@
       const dn = document.getElementById("exam-done");
       if (bar) bar.style.width = pct + "%";
       if (dn) dn.textContent = `${done} / ${total}`;
+    }
+
+    /* ============================================================
+       中文班（母语语文）模块
+       ============================================================ */
+    const NATIVE_LABELS = {
+      hanzi: ["📖", "字词"], text: ["📄", "课文"], poem: ["🏮", "古诗文"],
+      grammar: ["✏️", "词句段"], exercise: ["🏋️", "练习"], exam: ["📝", "随堂测"],
+      writing: ["✍️", "习作"], pronounce: ["🎤", "朗读"],
+    };
+
+    function renderNativeGrid() {
+      const app = document.getElementById("app");
+      const title = DATA.title || ("第 " + LESSON + " 课");
+      const mods = [
+        { key: "hanzi", desc: "生字 · 词语 · 听写", on: (DATA.hanzi || []).length + (DATA.vocab || []).length > 0 },
+        { key: "text", desc: "原文 · 分段朗读", on: !!DATA.text },
+        { key: "poem", desc: "注释 · 背诵默写", on: (DATA.poems || []).length > 0 },
+        { key: "grammar", desc: "语言运用训练", on: (DATA.grammar || []).length > 0 },
+        { key: "exercise", desc: "阅读题 · AI 批改", on: (DATA.exercises || []).length > 0 },
+        { key: "exam", desc: "随堂小测 · 自动判分", on: (DATA.exam || []).length > 0 },
+        { key: "writing", desc: "AI 反馈 · 老师批改", on: (DATA.writing || []).length > 0 },
+        { key: "pronounce", desc: "跟读评测", on: !!DATA.text },
+      ];
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="lessons.html">← 返回</a>
+          <h1 class="t-cn">${App.escapeHtml(title)}</h1>
+          <a class="btn btn-ghost btn-icon" href="lesson.html?lesson=${parseInt(LESSON) + 1}" title="下一课">→</a>
+        </div>
+        <div class="app-wrap fade-in">
+          <p class="muted" style="text-align:center;margin-top: var(--s-2)">选择模块开始学习</p>
+          <div class="module-grid-2">
+            ${mods.map(m => {
+              const [icon, zh] = NATIVE_LABELS[m.key];
+              return `<a class="module-card ${m.on ? "" : "locked"}" ${m.on ? `href="lesson.html?lesson=${LESSON}&module=${m.key}"` : ""}>
+                <div class="mc-icon">${icon}</div>
+                <div class="mc-zh">${zh}</div>
+                <div class="mc-th">${m.desc}</div>
+                ${m.on ? '<div class="mc-arrow">→</div>' : ""}
+              </a>`;
+            }).join("")}
+          </div>
+        </div>`;
+    }
+
+    function renderNativeModule(key) {
+      const app = document.getElementById("app");
+      const [icon, zh] = NATIVE_LABELS[key] || ["", ""];
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="lesson.html?lesson=${LESSON}">← 本课</a>
+          <h1 class="t-cn">${icon} ${zh}</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in"><div id="tab-content"></div></div>`;
+      const el = document.getElementById("tab-content");
+      ({ hanzi: renderHanzi, text: renderTextZh, poem: renderPoem,
+         grammar: renderGrammarZh, exercise: renderExerciseZh, exam: renderExamZh,
+         writing: renderWriting, pronounce: renderPronounceZh })[key](el);
+      window.scrollTo({ top: 0 });
+    }
+
+    /* ---------- 字词 + 听写 ---------- */
+    function renderHanzi(el) {
+      const chars = DATA.hanzi || [], words = DATA.vocab || [];
+      el.innerHTML = `
+        <div class="card" style="display:flex;gap:8px;padding:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" data-tab="chars">生字 (${chars.length})</button>
+          <button class="btn btn-ghost btn-sm" data-tab="words">词语 (${words.length})</button>
+          <button class="btn btn-ghost btn-sm" data-tab="dict">✍️ 听写</button>
+        </div>
+        <div id="hz-body"></div>`;
+      const body = document.getElementById("hz-body");
+      const tabs = el.querySelectorAll("[data-tab]");
+      const setTab = (t) => {
+        tabs.forEach(b => {
+          b.className = "btn btn-sm " + (b.dataset.tab === t ? "btn-secondary" : "btn-ghost");
+        });
+        if (t === "chars") showChars(body);
+        else if (t === "words") showWords(body);
+        else showDictation(body);
+      };
+      tabs.forEach(b => b.onclick = () => setTab(b.dataset.tab));
+      setTab("chars");
+    }
+
+    function showChars(body) {
+      const chars = DATA.hanzi || [];
+      if (!chars.length) { body.innerHTML = '<div class="card muted" style="text-align:center">本课没有生字表</div>'; return; }
+      body.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:10px">
+        ${chars.map(c => `
+          <div class="card" style="padding:12px;text-align:center">
+            <div class="t-cn" style="font-size:2rem;font-weight:700;line-height:1.2">${App.escapeHtml(c.char)}</div>
+            <div class="muted" style="font-size:.8rem">${App.escapeHtml(c.pinyin || "")}</div>
+            <div class="muted" style="font-size:.72rem;margin-top:2px">${App.escapeHtml([c.radical, c.strokes ? c.strokes + "画" : "", c.structure].filter(Boolean).join(" · "))}</div>
+            ${c.words ? `<div style="font-size:.78rem;margin-top:6px">${App.escapeHtml(c.words)}</div>` : ""}
+            ${c.note_zh ? `<div style="font-size:.72rem;color:#b85c1a;margin-top:4px">💡 ${App.escapeHtml(c.note_zh)}</div>` : ""}
+            <button class="btn btn-ghost btn-sm" style="margin-top:6px" data-say="${App.escapeHtml(c.char)}">🔊 听</button>
+          </div>`).join("")}
+      </div>`;
+      body.querySelectorAll("[data-say]").forEach(b => b.onclick = () => App.speak(b.dataset.say));
+    }
+
+    function showWords(body) {
+      const words = DATA.vocab || [];
+      if (!words.length) { body.innerHTML = '<div class="card muted" style="text-align:center">本课没有词语表</div>'; return; }
+      body.innerHTML = `<div class="card" style="margin-top:10px">
+        ${words.map(w => `
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px dashed var(--c-line)">
+            <div style="flex:1">
+              <span class="t-cn" style="font-weight:700;font-size:1.05rem">${App.escapeHtml(w.word)}</span>
+              <span class="muted" style="font-size:.8rem;margin-left:6px">${App.escapeHtml(w.pinyin || "")}</span>
+              ${w.meaning_zh ? `<div style="font-size:.82rem;color:var(--c-text-2);margin-top:2px">${App.escapeHtml(w.meaning_zh)}</div>` : ""}
+              ${w.example_zh ? `<div style="font-size:.78rem;color:var(--c-muted);margin-top:2px">例：${App.escapeHtml(w.example_zh)}</div>` : ""}
+            </div>
+            <button class="btn btn-ghost btn-sm" data-say="${App.escapeHtml(w.word)}">🔊</button>
+          </div>`).join("")}
+      </div>`;
+      body.querySelectorAll("[data-say]").forEach(b => b.onclick = () => App.speak(b.dataset.say));
+    }
+
+    const TONE_MAP = { "ā": "a", "á": "a", "ǎ": "a", "à": "a", "ē": "e", "é": "e", "ě": "e", "è": "e",
+      "ī": "i", "í": "i", "ǐ": "i", "ì": "i", "ō": "o", "ó": "o", "ǒ": "o", "ò": "o",
+      "ū": "u", "ú": "u", "ǔ": "u", "ù": "u", "ǖ": "v", "ǘ": "v", "ǚ": "v", "ǜ": "v", "ü": "v" };
+    function normPinyin(s) {
+      return (s || "").toLowerCase().replace(/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/g, c => TONE_MAP[c] || c)
+        .replace(/[^a-z]/g, "");
+    }
+    function normWord(s) { return (s || "").replace(/[\s，。！？、；：""''（）,.!?;:]/g, ""); }
+
+    let dictState = null;
+
+    function showDictation(body) {
+      const hasChars = (DATA.hanzi || []).length > 0;
+      const hasWords = (DATA.vocab || []).length > 0;
+      body.innerHTML = `
+        <div class="card" style="margin-top:10px">
+          <h2 style="font-size:1rem;margin-bottom:10px">✍️ 听写</h2>
+          <label style="font-size:.85rem;color:var(--c-muted)">范围</label>
+          <select id="d-scope" style="width:100%;margin:6px 0 12px;padding:10px;border-radius:10px;border:1px solid var(--c-line-2)">
+            ${hasWords ? '<option value="words">词语表</option>' : ""}
+            ${hasChars ? '<option value="chars">生字表</option>' : ""}
+          </select>
+          <label style="font-size:.85rem;color:var(--c-muted)">方式</label>
+          <select id="d-mode" style="width:100%;margin:6px 0 12px;padding:10px;border-radius:10px;border:1px solid var(--c-line-2)">
+            <option value="audio2word">语音听写（听发音，写词语）</option>
+            <option value="pinyin2word">看拼音写词语</option>
+            <option value="word2pinyin">词语注音（写拼音）</option>
+          </select>
+          <button class="btn btn-primary btn-block btn-lg" id="d-start">开始听写</button>
+          <p class="muted" style="font-size:.78rem;margin-top:10px">听写完成后自动记录成绩，答错的字词会进入错题本。</p>
+        </div>`;
+      document.getElementById("d-start").onclick = () => {
+        const scope = document.getElementById("d-scope").value;
+        const mode = document.getElementById("d-mode").value;
+        startDictation(body, scope, mode);
+      };
+    }
+
+    function startDictation(body, scope, mode) {
+      const pool = scope === "chars"
+        ? (DATA.hanzi || []).map(c => ({ target: c.char, type: "hanzi", ref: c.id, pinyin: c.pinyin }))
+        : (DATA.vocab || []).map(w => ({ target: w.word, type: "word", ref: w.id, pinyin: w.pinyin }));
+      if (!pool.length) { alert("没有可听写的内容"); return; }
+      dictState = { items: pool, idx: 0, results: [], mode, t0: Date.now() };
+      renderDictItem(body);
+    }
+
+    function renderDictItem(body) {
+      const s = dictState;
+      if (!s || s.idx >= s.items.length) return finishDictation(body);
+      const it = s.items[s.idx];
+      const mode = s.mode;
+      s.itemStart = Date.now();
+      let promptHtml = "";
+      if (mode === "audio2word") {
+        promptHtml = `<button class="btn btn-primary btn-block btn-lg" id="d-play">🔊 播放读音</button>
+          <p class="muted" style="text-align:center;font-size:.8rem;margin-top:6px">听发音，写出词语</p>`;
+      } else if (mode === "pinyin2word") {
+        promptHtml = `<div style="text-align:center;font-size:1.5rem;letter-spacing:.12em;font-family:monospace">${App.escapeHtml(it.pinyin || "")}</div>
+          <p class="muted" style="text-align:center;font-size:.8rem;margin-top:6px">看拼音，写词语</p>`;
+      } else {
+        promptHtml = `<div class="t-cn" style="text-align:center;font-size:2rem;font-weight:700">${App.escapeHtml(it.target)}</div>
+          <p class="muted" style="text-align:center;font-size:.8rem;margin-top:6px">写出这个词语的拼音</p>`;
+      }
+      body.innerHTML = `
+        <div class="card fade-in" style="margin-top:10px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+            <span class="muted t-mono">${s.idx + 1} / ${s.items.length}</span>
+            <span class="muted t-mono">已对 ${s.results.filter(r => r.is_correct).length}</span>
+          </div>
+          ${promptHtml}
+          <input id="d-input" type="text" autocomplete="off" autocapitalize="off"
+            style="width:100%;padding:14px;margin-top:14px;border-radius:12px;border:1px solid var(--c-line-2);font-size:1.1rem;text-align:center"
+            placeholder="${mode === "word2pinyin" ? "输入拼音" : "输入汉字"}">
+          <button class="btn btn-primary btn-block btn-lg" id="d-check" style="margin-top:10px">确定</button>
+          <div id="d-fb"></div>
+        </div>`;
+      const input = document.getElementById("d-input");
+      input.focus();
+      const play = document.getElementById("d-play");
+      if (play) play.onclick = () => App.speak(it.target);
+      input.onkeydown = (e) => { if (e.key === "Enter") document.getElementById("d-check").click(); };
+      document.getElementById("d-check").onclick = () => {
+        const val = input.value.trim();
+        if (!val) { input.focus(); return; }
+        let ok;
+        if (mode === "word2pinyin") ok = normPinyin(val) === normPinyin(it.pinyin);
+        else ok = normWord(val) === normWord(it.target);
+        s.results.push({
+          target: it.target, target_type: it.type, ref_id: it.ref,
+          input_text: val, is_correct: ok,
+          duration_ms: Date.now() - s.itemStart,
+        });
+        input.disabled = true;
+        document.getElementById("d-check").style.display = "none";
+        document.getElementById("d-fb").innerHTML = `
+          <div class="feedback-box ${ok ? "correct" : "incorrect"}" style="margin-top:12px">
+            <div class="verdict-badge ${ok ? "correct" : "incorrect"}">${ok ? "✅ 正确" : "❌ 再记一记"}</div>
+            <div>正确答案：<b class="t-cn">${App.escapeHtml(mode === "word2pinyin" ? (it.pinyin || "") : it.target)}</b></div>
+          </div>
+          <button class="btn btn-primary btn-block btn-lg" id="d-next" style="margin-top:10px">${s.idx === s.items.length - 1 ? "完成听写" : "下一题 →"}</button>`;
+        document.getElementById("d-next").onclick = () => {
+          s.idx++;
+          if (s.idx >= s.items.length) finishDictation(body);
+          else renderDictItem(body);
+        };
+      };
+    }
+
+    async function finishDictation(body) {
+      const s = dictState;
+      if (!s) return;
+      const results = s.results;
+      const correct = results.filter(r => r.is_correct).length;
+      const score = results.length ? Math.round(correct / results.length * 100) : 0;
+      body.innerHTML = `
+        <div class="card fade-in" style="margin-top:10px;text-align:center">
+          <div style="font-size:2.2rem;font-weight:800;color:var(--c-primary-d)">${score} 分</div>
+          <div class="muted">共 ${results.length} 题，答对 ${correct} 题</div>
+          <div id="d-save" class="muted" style="margin-top:10px;font-size:.85rem">正在保存...</div>
+          ${results.filter(r => !r.is_correct).length ? `
+            <div style="text-align:left;margin-top:16px">
+              <b>需要复习：</b>
+              <div style="margin-top:6px">${results.filter(r => !r.is_correct).map(r =>
+                `<span class="badge" style="display:inline-block;margin:3px;background:#fdecec;color:#b33;padding:4px 10px;border-radius:999px">${App.escapeHtml(r.target)}</span>`).join("")}</div>
+            </div>` : ""}
+          <button class="btn btn-primary btn-block btn-lg" id="d-again" style="margin-top:16px">再听写一遍</button>
+          <button class="btn btn-ghost btn-block" id="d-back" style="margin-top:8px">返回字词</button>
+        </div>`;
+      document.getElementById("d-again").onclick = () => showDictation(body);
+      document.getElementById("d-back").onclick = () => renderHanzi(document.getElementById("tab-content"));
+      try {
+        await App.call("/api/dictation/submit", {
+          method: "POST",
+          body: JSON.stringify({ lesson_no: LESSON, scope: s.items[0].type === "hanzi" ? "chars" : "words",
+            mode: s.mode, results })
+        });
+        document.getElementById("d-save").textContent = "✅ 已保存，错题已进入错题本";
+      } catch (e) {
+        document.getElementById("d-save").textContent = "保存失败，请检查网络后重试";
+      }
+    }
+
+    /* ---------- 课文（中文） ---------- */
+    function renderTextZh(el) {
+      const t = DATA.text;
+      if (!t) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无课文</div>'; return; }
+      const paras = (t.body_zh || "").split(/\n+/).filter(x => x.trim());
+      el.innerHTML = `
+        <div class="card text-card fade-in">
+          <h2 style="margin-bottom: var(--s-2)">${App.escapeHtml(t.title || "")}</h2>
+          <button class="btn btn-primary btn-block btn-lg" id="text-say" style="margin-bottom: var(--s-4)">🔊 全文朗读</button>
+          <div class="t-cn" style="line-height:2;font-size:1.05rem">
+            ${paras.map((p, i) => `<p style="text-indent:2em;margin-bottom:.6em">${App.escapeHtml(p.trim())}
+              <button class="sent-mini-play" data-p="${i}" title="朗读本段">🔊</button></p>`).join("")}
+          </div>
+        </div>
+        <div class="card fade-in" style="margin-top:12px">
+          <h3 style="font-size:1rem;margin-bottom:8px">🎤 朗读打卡</h3>
+          <p class="muted" style="font-size:.82rem">点下面的按钮，选其中一段读出来，AI 会给你评价。</p>
+          <button class="btn btn-secondary btn-block" id="read-btn" style="margin-top:8px">开始朗读（选第一段）</button>
+          <div id="read-result"></div>
+        </div>`;
+      const full = paras.join("");
+      document.getElementById("text-say").onclick = () => App.speak(full);
+      el.querySelectorAll("[data-p]").forEach(b => {
+        b.onclick = () => App.speak(paras[parseInt(b.dataset.p)] || "");
+      });
+      document.getElementById("read-btn").onclick = () => readAloud(paras[0] || full, el);
+    }
+
+    function readAloud(target, el) {
+      const box = document.getElementById("read-result");
+      if (!App.speechSupported()) {
+        box.innerHTML = '<div class="feedback-box error-text" style="margin-top:10px">这个浏览器不支持语音识别，可以先跟着「全文朗读」自己读。</div>';
+        return;
+      }
+      box.innerHTML = '<div class="loading-pulse" style="margin-top:10px">请开始朗读...</div>';
+      App.speech("zh-CN",
+        async (final) => {
+          box.innerHTML = `<div class="feedback-box"><b>识别到：</b>${App.escapeHtml(final)}</div><div class="explain-box">AI 评价中...</div>`;
+          try {
+            const r = await App.call("/api/pronounce", {
+              method: "POST",
+              body: JSON.stringify({ target_text: target, recognized_text: final })
+            });
+            box.innerHTML = `<div class="feedback-box"><b>识别到：</b>${App.escapeHtml(r.recognized || final)}</div>
+              <div class="explain-box">${App.escapeHtml(r.feedback)}</div>`;
+          } catch (e) {
+            box.innerHTML = '<div class="feedback-box error-text">评价失败，稍后再试</div>';
+          }
+        },
+        (interim) => { box.innerHTML = `<p class="muted">${App.escapeHtml(interim || "")}</p>`; },
+        null,
+        (err) => { box.innerHTML = `<div class="feedback-box error-text">语音识别失败（${App.escapeHtml(err)}），可以改用 Chrome 浏览器再试。</div>`; });
+    }
+
+    /* ---------- 古诗文 ---------- */
+    function renderPoem(el) {
+      const poems = DATA.poems || [];
+      if (!poems.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课没有古诗文</div>'; return; }
+      el.innerHTML = poems.map((p, i) => `
+        <div class="card fade-in" style="margin-bottom:14px" data-poem="${i}">
+          <h2 style="text-align:center;font-size:1.2rem">${App.escapeHtml(p.title)}</h2>
+          <p style="text-align:center;color:var(--c-muted);font-size:.85rem;margin-top:2px">
+            ${App.escapeHtml([p.dynasty, p.author].filter(Boolean).join(" · "))}
+          </p>
+          <div class="t-cn" style="font-size:1.12rem;line-height:2.1;text-align:center;margin:16px 0;white-space:pre-wrap">${App.escapeHtml(p.body)}</div>
+          <button class="btn btn-secondary btn-block" data-say="${i}">🔊 朗读</button>
+          ${(p.notes || []).length ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">注释</summary>
+            <div style="margin-top:8px;font-size:.88rem;line-height:1.8">${p.notes.map(n =>
+              `<div><b>${App.escapeHtml(n.word || "")}</b>：${App.escapeHtml(n.note || "")}</div>`).join("")}</div></details>` : ""}
+          ${p.translation ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">译文</summary>
+            <div style="margin-top:8px;font-size:.9rem;line-height:1.9">${App.escapeHtml(p.translation)}</div></details>` : ""}
+          <div style="margin-top:16px">
+            <b style="font-size:.95rem">默写检测</b>
+            <p class="muted" style="font-size:.78rem;margin:4px 0 6px">不看原文，把这首诗完整默写下来（标点可不写）。</p>
+            <textarea id="dict-${i}" rows="5" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--c-line-2)" placeholder="在这里默写..."></textarea>
+            <button class="btn btn-primary btn-block" data-check="${i}" style="margin-top:8px">提交默写</button>
+            <div id="poem-fb-${i}"></div>
+          </div>
+        </div>`).join("");
+      el.querySelectorAll("[data-say]").forEach(b => {
+        b.onclick = () => App.speak(poems[parseInt(b.dataset.say)].body);
+      });
+      el.querySelectorAll("[data-check]").forEach(b => {
+        const i = parseInt(b.dataset.check);
+        const p = poems[i];
+        b.onclick = async () => {
+          const text = document.getElementById("dict-" + i).value.trim();
+          if (!text) { alert("请先默写"); return; }
+          b.disabled = true; b.textContent = "批改中...";
+          try {
+            const r = await App.call("/api/recitation/submit", {
+              method: "POST",
+              body: JSON.stringify({ poem_id: p.id, mode: "full_dictation", input_text: text })
+            });
+            document.getElementById("poem-fb-" + i).innerHTML = `
+              <div class="feedback-box ${r.score >= 80 ? "correct" : "partial"}" style="margin-top:10px">
+                <div class="verdict-badge ${r.score >= 80 ? "correct" : "partial"}">得分 ${r.score}</div>
+                ${(r.detail.missing_chars || []).length ? `<div style="margin-top:6px">漏写或写错的字：<b>${r.detail.missing_chars.map(c => App.escapeHtml(c)).join(" ")}</b></div>` : "<div>默写完整，很棒！</div>"}
+              </div>`;
+          } catch (e) {
+            document.getElementById("poem-fb-" + i).innerHTML = '<div class="feedback-box error-text">提交失败，请重试</div>';
+          } finally { b.disabled = false; b.textContent = "提交默写"; }
+        };
+      });
+    }
+
+    /* ---------- 词句段 ---------- */
+    function renderGrammarZh(el) {
+      const g = DATA.grammar || [];
+      if (!g.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无词句段内容</div>'; return; }
+      el.innerHTML = g.map(p => `
+        <div class="card grammar-card fade-in" style="margin-bottom:12px">
+          <div class="grammar-point t-cn">${App.escapeHtml(p.point)}</div>
+          <div class="grammar-explain" style="line-height:1.9">${App.escapeHtml(p.explanation_zh || "")}</div>
+          ${p.example_zh ? `<div class="grammar-example"><div class="ex-zh t-cn">${App.escapeHtml(p.example_zh)}</div></div>` : ""}
+        </div>`).join("");
+    }
+
+    /* ---------- 练习（中文） ---------- */
+    let exIdxZh = 0, exBusyZh = false;
+
+    function renderExerciseZh(el) {
+      const items = DATA.exercises || [];
+      if (!items.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无练习</div>'; return; }
+      if (exIdxZh >= items.length) exIdxZh = 0;
+      const it = items[exIdxZh];
+      el.innerHTML = `
+        <div class="card fade-in">
+          <div class="exercise-header">
+            <span class="muted t-mono">${exIdxZh + 1} / ${items.length}</span>
+            <div class="progress"><div class="bar"><span style="width:${((exIdxZh + 1) / items.length) * 100}%"></span></div></div>
+            <span class="badge" style="background:var(--c-primary-l);color:var(--c-primary-d);padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:600">${App.escapeHtml(it.q_type || it.module || "练习")}</span>
+          </div>
+          <div class="exercise-q t-cn" style="white-space:pre-wrap">${App.escapeHtml(it.prompt_zh)}</div>
+          <div class="exercise-input">
+            <textarea id="input" placeholder="在这里写下你的答案..." rows="4"></textarea>
+          </div>
+          <button class="btn btn-primary btn-block btn-lg" id="btn-submit" style="margin-top:10px">提交</button>
+          <div id="feedback"></div>
+        </div>`;
+      document.getElementById("btn-submit").onclick = () => submitExerciseZh(it, el);
+    }
+
+    async function submitExerciseZh(it, el) {
+      if (exBusyZh) return;
+      const input = document.getElementById("input").value.trim();
+      if (!input) { alert("请先写出答案"); return; }
+      exBusyZh = true;
+      const btn = document.getElementById("btn-submit");
+      btn.disabled = true; btn.textContent = "AI 老师批改中...";
+      const fb = document.getElementById("feedback");
+      fb.innerHTML = '<div class="loading-pulse" style="margin-top:12px"><span>AI 老师正在看你的答案...</span></div>';
+      try {
+        const r = await App.call("/api/feedback", {
+          method: "POST",
+          body: JSON.stringify({ module: it.module, item_id: it.id, input_text: input })
+        });
+        const map = { correct: ["✅ 答对了", "correct"], partial: ["💡 接近了", "partial"], incorrect: ["💡 再想一想", "incorrect"] };
+        const [badge, cls] = map[r.verdict] || ["", ""];
+        fb.innerHTML = `
+          <div class="feedback-box ${cls} fade-in" style="margin-top:12px">
+            <div class="verdict-badge ${cls}">${badge}</div>
+            <div style="line-height:1.8">${App.escapeHtml(r.feedback_zh || "")}</div>
+            ${r.example_zh ? `<div style="margin-top:8px;font-size:.9rem">📖 范例：${App.escapeHtml(r.example_zh)}</div>` : ""}
+          </div>
+          <div class="hint-row">
+            ${r.hint1_zh ? '<button class="hint-pill" data-h="1">💡 提示一</button>' : ""}
+            ${r.hint2_zh ? '<button class="hint-pill" data-h="2">💡💡 提示二</button>' : ""}
+            ${r.example_zh ? '<button class="hint-pill" data-h="3">📖 范例</button>' : ""}
+            ${r.answer_zh ? '<button class="hint-pill" data-h="4">✅ 参考答案</button>' : ""}
+          </div>
+          <div id="reveals"></div>
+          ${it.explanation_th ? `<div class="explain-box" style="margin-top:10px"><b>为什么这么答</b><br>${App.escapeHtml(it.explanation_th)}</div>` : ""}
+          <div class="decision-row" id="decision-box">
+            <div class="d-q">AI 说得对吗？</div>
+            <div class="decision-opts">
+              <button data-r="agree">👍 同意</button>
+              <button data-r="disagree">👎 不同意</button>
+              <button data-r="not_sure">🤔 不确定</button>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top:16px">${exIdxZh === DATA.exercises.length - 1 ? "🎉 完成" : "下一题 →"}</button>`;
+        document.getElementById("btn-next").onclick = () => {
+          exIdxZh = exIdxZh === DATA.exercises.length - 1 ? 0 : exIdxZh + 1;
+          renderNativeModule("exercise");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        };
+        const HINTS = { 1: r.hint1_zh, 2: r.hint2_zh, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
+        fb.querySelectorAll("[data-h]").forEach(b => b.onclick = () => {
+          const lv = parseInt(b.dataset.h);
+          b.disabled = true;
+          const div = document.createElement("div");
+          div.className = "revealed-hint";
+          div.innerHTML = "<b>提示</b> " + App.escapeHtml(HINTS[lv] || "");
+          document.getElementById("reveals").appendChild(div);
+          App.call("/api/hint", { method: "POST", body: JSON.stringify({ module: it.module, item_id: it.id, hint_level: lv }) }).catch(() => {});
+        });
+        fb.querySelectorAll("#decision-box [data-r]").forEach(b => b.onclick = async () => {
+          const box = document.getElementById("decision-box");
+          const kind = b.dataset.r;
+          let text = "";
+          if (kind === "disagree") text = (prompt("说说你为什么不同意（可留空）") || "").trim();
+          box.querySelectorAll("[data-r]").forEach(x => { x.disabled = true; });
+          b.classList.add("chosen");
+          try {
+            await App.call("/api/feedback/reason", {
+              method: "POST",
+              body: JSON.stringify({ reason_type: kind, reason_text: text, item_id: it.id })
+            });
+          } catch (e) {}
+          box.insertAdjacentHTML("beforeend", '<div class="decision-done" style="margin-top:8px">✅ 已记录</div>');
+        });
+      } catch (e) {
+        fb.innerHTML = '<div class="feedback-box error-text" style="margin-top:12px">提交失败，请稍后重试</div>';
+      } finally {
+        exBusyZh = false;
+        btn.disabled = false; btn.textContent = "提交";
+      }
+    }
+
+    /* ---------- 随堂测（中文） ---------- */
+    function renderExamZh(el) {
+      const qs = DATA.exam || [];
+      if (!qs.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无测验</div>'; return; }
+      el.innerHTML = `
+        <div class="exercise-header">
+          <span class="muted t-mono">${qs.length} 题</span>
+          <div class="progress"><div class="bar"><span id="exam-bar" style="width:0%"></span></div></div>
+          <span class="muted t-mono" id="exam-done">0 / ${qs.length}</span>
+        </div>` + qs.map((q, i) => `
+          <div class="card exam-card fade-in" data-qi="${q.id}">
+            <div class="exam-q-meta"><span class="num">${i + 1}</span>
+              <span class="t-mono" style="margin-left:auto">${App.escapeHtml(q.q_type || "")}</span></div>
+            <div class="exam-q-text t-cn">${App.escapeHtml(q.question_zh)}</div>
+            <div class="exam-options">
+              ${["A", "B", "C", "D"].map(l => `<button class="exam-opt" data-q="${q.id}" data-opt="${l}">
+                <span class="letter">${l}</span><span class="t-cn">${App.escapeHtml(q["option_" + l.toLowerCase()] || "")}</span></button>`).join("")}
+            </div>
+          </div>`).join("") +
+        '<button class="btn btn-primary btn-block btn-xl fade-in" id="btn-exam" style="margin-top:16px">交卷</button><div id="exam-result"></div>';
+      el.querySelectorAll(".exam-opt").forEach(b => {
+        b.onclick = () => {
+          const qid = b.dataset.q;
+          el.querySelectorAll(`.exam-opt[data-q="${qid}"]`).forEach(x => x.classList.remove("selected"));
+          b.classList.add("selected");
+          updateExamProgress();
+        };
+      });
+      document.getElementById("btn-exam").onclick = async () => {
+        const answers = [];
+        el.querySelectorAll(".exam-opt.selected").forEach(b => answers.push({ exam_id: parseInt(b.dataset.q), chosen: b.dataset.opt }));
+        if (!answers.length) { alert("请至少选 1 题"); return; }
+        const btn = document.getElementById("btn-exam");
+        btn.disabled = true; btn.textContent = "判分中...";
+        try {
+          const r = await App.call("/api/exam/submit", { method: "POST", body: JSON.stringify({ lesson_no: LESSON, answers }) });
+          document.getElementById("exam-result").innerHTML = `
+            <div class="card fade-in" style="margin-top:12px;text-align:center;background:linear-gradient(135deg,var(--c-primary-l),#e9f7ee);border:2px solid var(--c-primary)">
+              <div style="font-size:2.5rem;font-weight:800;color:var(--c-primary-d)">${r.score} 分</div>
+              <div class="muted" style="margin-top:4px">答对 ${r.correct} / ${r.total} 题</div>
+            </div>` + r.results.map((res, i) => `
+            <div class="card ${res.is_correct ? "" : "wrong"}" style="margin-top:10px">
+              <div class="exam-q-meta"><span class="num">${i + 1}</span>
+                <span style="color:${res.is_correct ? "var(--c-primary-d)" : "var(--c-danger)"};font-weight:600">
+                  ${res.is_correct ? "✅ 正确" : `❌ 你选 ${res.chosen || "-"} · 答案 ${res.correct_letter}`}</span></div>
+              <div class="exam-q-text t-cn">${App.escapeHtml(res.question_zh)}</div>
+              ${res.explanation ? `<div class="explain-box">${App.escapeHtml(res.explanation)}</div>` : ""}
+            </div>`).join("");
+          btn.style.display = "none";
+          window.scrollTo({ top: document.getElementById("exam-result").offsetTop - 80, behavior: "smooth" });
+        } catch (e) { alert("交卷失败"); btn.disabled = false; btn.textContent = "交卷"; }
+      };
+    }
+
+    /* ---------- 习作 ---------- */
+    function renderWriting(el) {
+      const tasks = DATA.writing || [];
+      if (!tasks.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本单元暂无习作任务</div>'; return; }
+      const t = tasks[0];
+      el.innerHTML = `
+        <div class="card fade-in">
+          <h2 class="t-cn" style="font-size:1.15rem">✍️ ${App.escapeHtml(t.title)}</h2>
+          <div class="muted" style="font-size:.85rem;margin-top:4px">要求不少于 ${t.min_words || 400} 字</div>
+          <div class="t-cn" style="margin-top:12px;line-height:1.9;white-space:pre-wrap">${App.escapeHtml(t.prompt || "")}</div>
+          ${t.requirements ? `<div class="explain-box" style="margin-top:10px"><b>写作要求</b><br>${App.escapeHtml(t.requirements)}</div>` : ""}
+        </div>
+        <div class="card fade-in" style="margin-top:12px">
+          <textarea id="w-content" rows="14" placeholder="在这里写作文..."
+            style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--c-line-2);line-height:1.9;font-size:1rem;font-family:'Noto Sans SC',sans-serif"></textarea>
+          <div style="display:flex;justify-content:space-between;margin-top:6px">
+            <span class="muted" style="font-size:.8rem" id="w-count">0 字</span>
+            <span class="muted" style="font-size:.8rem" id="w-save"></span>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn btn-secondary" id="w-draft" style="flex:1">保存草稿</button>
+            <button class="btn btn-primary" id="w-submit" style="flex:2">提交让 AI 批改</button>
+          </div>
+          <div id="w-result"></div>
+        </div>`;
+      const ta = document.getElementById("w-content");
+      const cnt = () => {
+        const n = (ta.value || "").replace(/[\s，。！？、；：""''（）,.!?;:]/g, "").length;
+        document.getElementById("w-count").textContent = n + " 字";
+        return n;
+      };
+      ta.oninput = cnt;
+      document.getElementById("w-draft").onclick = async () => {
+        try {
+          await App.call("/api/writing/save", { method: "POST",
+            body: JSON.stringify({ task_id: t.id, content: ta.value, draft_no: 1 }) });
+          document.getElementById("w-save").textContent = "✅ 草稿已保存 " + new Date().toLocaleTimeString();
+        } catch (e) { document.getElementById("w-save").textContent = "保存失败"; }
+      };
+      document.getElementById("w-submit").onclick = async () => {
+        const n = cnt();
+        if (n < 50) { alert("作文还太短，再写一些吧"); return; }
+        if (n < (t.min_words || 400) * 0.8 && !confirm(`现在只有 ${n} 字，要求不少于 ${t.min_words || 400} 字，确定提交吗？`)) return;
+        const btn = document.getElementById("w-submit");
+        btn.disabled = true; btn.textContent = "AI 老师批改中，约需 20 秒...";
+        try {
+          const r = await App.call("/api/writing/submit", { method: "POST",
+            body: JSON.stringify({ task_id: t.id, content: ta.value, draft_no: 1 }) });
+          const fb = r.feedback;
+          if (!fb) {
+            document.getElementById("w-result").innerHTML =
+              '<div class="feedback-box partial" style="margin-top:12px">作文已提交，AI 批改暂时不可用，老师会尽快批阅。</div>';
+          } else {
+            const s = fb.scores || {};
+            const dims = ["内容", "结构", "语言", "规范"];
+            document.getElementById("w-result").innerHTML = `
+              <div class="card fade-in" style="margin-top:14px;background:var(--c-primary-l)">
+                <div style="font-size:2rem;font-weight:800;color:var(--c-primary-d);text-align:center">${s["总分"] || "-"} 分</div>
+                <div style="display:flex;justify-content:space-around;margin-top:10px;font-size:.85rem">
+                  ${dims.map(d => `<span>${d} ${s[d] != null ? s[d] : "-"}</span>`).join("")}
+                </div>
+              </div>
+              ${(fb.highlights || []).length ? `<div class="explain-box" style="margin-top:10px"><b>✨ 亮点</b><br>${fb.highlights.map(h => App.escapeHtml(h)).join("<br>")}</div>` : ""}
+              ${(fb.suggestions || []).length ? `<div class="card" style="margin-top:10px">
+                <b>修改建议</b>
+                ${fb.suggestions.map((x, i) => `<div style="margin-top:10px;padding:10px;border-left:3px solid var(--c-primary);background:#fafafa;border-radius:6px">
+                  ${x.quote ? `<div style="font-size:.85rem;color:var(--c-muted)">「${App.escapeHtml(x.quote)}」</div>` : ""}
+                  <div style="margin-top:4px">${i + 1}. ${App.escapeHtml(x.advice)}</div>
+                </div>`).join("")}
+              </div>` : ""}
+              ${fb.overall ? `<div class="explain-box" style="margin-top:10px"><b>总评</b><br>${App.escapeHtml(fb.overall)}</div>` : ""}
+              <p class="muted" style="font-size:.8rem;margin-top:10px;text-align:center">修改后可以再提交一稿，老师还会给最终评分。</p>`;
+            document.getElementById("w-save").textContent = "✅ 已提交（第 1 稿）";
+          }
+        } catch (e) {
+          document.getElementById("w-result").innerHTML = '<div class="feedback-box error-text" style="margin-top:12px">提交失败，请重试</div>';
+        } finally { btn.disabled = false; btn.textContent = "提交让 AI 批改"; }
+      };
+    }
+
+    /* ---------- 朗读 ---------- */
+    function renderPronounceZh(el) {
+      const t = DATA.text;
+      const paras = ((t && t.body_zh) || "").split(/\n+/).filter(x => x.trim());
+      if (!paras.length) { el.innerHTML = '<div class="card muted" style="text-align:center">暂无朗读内容</div>'; return; }
+      el.innerHTML = `<div class="card fade-in" style="margin-bottom:12px">
+        <h2 style="font-size:1rem">🎤 朗读练习</h2>
+        <p class="muted" style="font-size:.85rem">先听一遍，再点「跟读」读出选中的段落。</p></div>` +
+        paras.map((p, i) => `
+          <div class="card fade-in" style="margin-bottom:10px;padding:14px">
+            <div class="t-cn" style="line-height:1.9;margin-bottom:10px">${App.escapeHtml(p.trim())}</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-secondary" style="flex:1" data-listen="${i}">🔊 先听</button>
+              <button class="btn btn-primary" style="flex:1" data-read="${i}">🎤 跟读</button>
+            </div>
+            <div id="pr2-${i}"></div>
+          </div>`).join("");
+      el.querySelectorAll("[data-listen]").forEach(b => b.onclick = () => App.speak(paras[parseInt(b.dataset.listen)]));
+      el.querySelectorAll("[data-read]").forEach(b => b.onclick = () => {
+        const i = parseInt(b.dataset.read);
+        const box = document.getElementById("pr2-" + i);
+        if (!App.speechSupported()) { box.innerHTML = '<div class="feedback-box error-text" style="margin-top:8px">此浏览器不支持语音识别，可以先听读。</div>'; return; }
+        box.innerHTML = '<div class="loading-pulse" style="margin-top:8px">请朗读...</div>';
+        App.speech("zh-CN",
+          async (final) => {
+            box.innerHTML = `<div class="feedback-box" style="margin-top:8px"><b>识别到：</b>${App.escapeHtml(final)}</div>`;
+            try {
+              const r = await App.call("/api/pronounce", { method: "POST",
+                body: JSON.stringify({ target_text: paras[i], recognized_text: final }) });
+              box.insertAdjacentHTML("beforeend", `<div class="explain-box">${App.escapeHtml(r.feedback)}</div>`);
+            } catch (e) {}
+          },
+          null, null,
+          (err) => { box.innerHTML = `<div class="feedback-box error-text" style="margin-top:8px">识别失败（${App.escapeHtml(err)}）</div>`; });
+      });
     }
   </script>
 </body>

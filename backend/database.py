@@ -9,7 +9,8 @@ DATA_DIR = os.getenv("DATA_DIR") or BASE_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DATA_DIR, "app.db")
-CONTENT_DB_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "content", "content.db"))
+CONTENT_DB_PATH = os.getenv("CONTENT_DB_PATH") or os.path.normpath(
+    os.path.join(BASE_DIR, "..", "content", "content.db"))
 CONTENT_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "content"))
 
 SCHEMA = """
@@ -159,6 +160,109 @@ CREATE TABLE IF NOT EXISTS task_offline(
   task_source TEXT DEFAULT 'offline'
 );
 
+-- ============ 中文班（母语语文，C6/1） ============
+-- 作业：老师带课的核心对象
+CREATE TABLE IF NOT EXISTS assignments(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id TEXT NOT NULL,
+  teacher_id TEXT DEFAULT 'teacher',
+  title TEXT NOT NULL,
+  type TEXT DEFAULT 'exercise',      -- dictation/exercise/exam/writing/recitation/reading/offline
+  ref_json TEXT,                     -- {book, unit, lesson_no, item_ids, task_id, scope}
+  instructions TEXT,
+  publish_at TEXT DEFAULT (datetime('now')),
+  due_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS assignment_submissions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assignment_id INTEGER NOT NULL,
+  student_id INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending',     -- pending/submitted/late/graded/missing
+  submitted_at TEXT,
+  score REAL,
+  detail_json TEXT,
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(assignment_id, student_id)
+);
+-- 听写逐题记录
+CREATE TABLE IF NOT EXISTS dictation_events(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  lesson_no TEXT, unit INTEGER,
+  target TEXT, target_type TEXT,     -- hanzi/word
+  ref_id INTEGER,                    -- hanzi.id / vocab.id
+  mode TEXT,                         -- audio2word/pinyin2word/word2pinyin
+  input_text TEXT,
+  is_correct INTEGER,
+  wrong_part TEXT,
+  duration_ms INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- 背诵/默写记录
+CREATE TABLE IF NOT EXISTS recitation_events(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  poem_id INTEGER, lesson_no TEXT,
+  mode TEXT,                         -- full_dictation/dictation_fill/recite_audio
+  score REAL,
+  detail_json TEXT,
+  audio_url TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- 习作：一稿一行
+CREATE TABLE IF NOT EXISTS writing_submissions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  task_id INTEGER NOT NULL,
+  assignment_id INTEGER,
+  draft_no INTEGER DEFAULT 1,
+  outline TEXT,
+  content TEXT,
+  word_count INTEGER,
+  duration_seconds INTEGER,
+  ai_scores_json TEXT,
+  ai_feedback_json TEXT,
+  teacher_scores_json TEXT,
+  teacher_comment TEXT,
+  status TEXT DEFAULT 'draft',       -- draft/submitted/ai_reviewed/teacher_reviewed
+  submitted_at TEXT,
+  reviewed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- 习作修改痕迹
+CREATE TABLE IF NOT EXISTS writing_revisions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id INTEGER NOT NULL,
+  from_draft INTEGER, to_draft INTEGER,
+  diff_json TEXT,
+  adopted_suggestion_ids TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- 课外阅读打卡
+CREATE TABLE IF NOT EXISTS reading_logs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  book_title TEXT, chapter TEXT,
+  minutes INTEGER, pages INTEGER,
+  note TEXT,
+  verified_by TEXT DEFAULT 'self',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+-- 错题本（物化，重练/掌握后更新）
+CREATE TABLE IF NOT EXISTS error_items(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  source TEXT,                       -- exercise/exam/dictation/recitation
+  ref_id INTEGER,
+  q_type TEXT,
+  knowledge_tag TEXT,
+  wrong_count INTEGER DEFAULT 1,
+  last_wrong_at TEXT DEFAULT (datetime('now')),
+  mastered INTEGER DEFAULT 0,
+  UNIQUE(student_id, source, ref_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_weekly_student ON weekly_reports(student_id);
 CREATE INDEX IF NOT EXISTS idx_diag_student ON diagnostics(student_id);
 CREATE INDEX IF NOT EXISTS idx_sugg_student ON suggestions(student_id);
@@ -215,6 +319,10 @@ def _migrate(conn):
     add_col("students", "password", "TEXT")
     add_col("students", "avatar_url", "TEXT")
     add_col("students", "signature", "TEXT")
+    # 中文班：班级模式 / 界面模式 / 时区
+    add_col("classes", "mode", "TEXT DEFAULT 'research'")       # research / teaching
+    add_col("classes", "ui_mode", "TEXT DEFAULT 'l2'")          # l2 / native
+    add_col("classes", "tz_offset", "TEXT DEFAULT '+7 hours'")
     conn.commit()
 
 

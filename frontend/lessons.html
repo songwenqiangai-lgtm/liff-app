@@ -39,14 +39,20 @@
   <script>
     if (!App.requireLogin()) {/* redirected */} else { render(); }
 
+    const UNIT_NAMES = {
+      1: "触摸自然", 2: "革命岁月", 3: "有目的地阅读", 4: "小说",
+      5: "围绕中心意思写", 6: "保护环境", 7: "艺术之美", 8: "走近鲁迅",
+    };
+    const CN_NUM = ["", "一", "二", "三", "四", "五", "六", "七", "八"];
+
     async function render() {
       const app = document.getElementById("app");
-      const me = { display_name: localStorage.getItem("display_name") || "学生" };
-      let lessons = [];
+      let data = { lessons: [], ui_mode: "l2" };
       try {
-        const r = await App.call("/api/lessons");
-        lessons = r.lessons || [];
+        data = await App.call("/api/lessons");
       } catch (e) { /* ignore */ }
+      if (data.ui_mode === "native" || data.units) return renderNative(app, data);
+      const lessons = data.lessons || [];
       const cards = lessons.length
         ? lessons.map((l, i) => `
           <a class="lesson-row" href="lesson.html?lesson=${l.lesson_no}">
@@ -74,6 +80,39 @@
           <h1>📚 课程学习 · บทเรียนของฉัน</h1>
         </div>
         <div class="app-wrap fade-in">${cards}</div>`;
+    }
+
+    function renderNative(app, data) {
+      const units = data.units || [];
+      const blocks = units.map(u => {
+        const name = UNIT_NAMES[u.unit] || "";
+        const lessons = u.lessons.map(l => `
+          <a class="lesson-row" href="lesson.html?lesson=${l.lesson_no}">
+            <div class="lr-num">第 ${l.lesson_no} 课${l.type === "skim" ? " · 略读" : ""}</div>
+            <div class="lr-title">${App.escapeHtml(l.title)}</div>
+          </a>`).join("");
+        const writings = (u.writings || []).map(w => `
+          <a class="lesson-row" href="writing.html?task_id=${w.id}" style="border-left:4px solid #c88a3e">
+            <div class="lr-num">单元习作</div>
+            <div class="lr-title">✍️ ${App.escapeHtml(w.title)}</div>
+          </a>`).join("");
+        return `
+          <div style="margin: var(--s-5) 0 var(--s-2); padding: 0 var(--s-4)">
+            <h2 style="font-size:1.05rem;color:var(--c-text)">
+              第${CN_NUM[u.unit] || u.unit}单元${name ? " · " + name : ""}
+            </h2>
+          </div>
+          <div style="padding: 0 var(--s-4)">${lessons}${writings}</div>`;
+      }).join("");
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="home.html">← 返回</a>
+          <h1>📚 六年级上册</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+          ${blocks || '<div class="card muted" style="text-align:center">还没有课程内容</div>'}
+        </div>`;
     }
   </script>
 </body>

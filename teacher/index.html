@@ -95,6 +95,10 @@
         <button class="nav-item" data-view="fidelity">📋 保真度</button>
         <button class="nav-item" data-view="phases">🔄 阶段管理</button>
         <button class="nav-item" data-view="assign">📚 课程分配</button>
+        <button class="nav-item" data-view="native">🀄 中文班看板</button>
+        <button class="nav-item" data-view="assignments">📝 作业管理</button>
+        <button class="nav-item" data-view="dictation">✍️ 听写背诵</button>
+        <button class="nav-item" data-view="writings">📄 作文批改</button>
         <button class="nav-item" data-view="assessments">📝 成绩录入</button>
         <button class="nav-item" data-view="export">⬇ 数据导出</button>
         <button class="nav-item" id="btn-logout">🚪 退出</button>
@@ -159,7 +163,9 @@
       "handoff-new": viewHandoffNew, avoidance: viewAvoidance, inject: viewInject,
       fidelity: viewFidelity, phases: viewPhases, assign: viewAssign,
       assessments: viewAssessments, export: viewExport,
-      weekly: viewWeekly, notifications: viewNotifications };
+      weekly: viewWeekly, notifications: viewNotifications,
+      native: viewNative, assignments: viewAssignments,
+      dictation: viewDictation, writings: viewWritings };
     function go(v) { VIEWS[v] ? VIEWS[v]() : viewOverview(); }
 
     /* ---------- 1 班级总览 ---------- */
@@ -529,11 +535,183 @@
       });
     }
 
+    /* ================= 中文班（C6/1） ================= */
+
+    async function viewNative() {
+      const el = document.getElementById("view");
+      const d = await api("/teacher/native_overview?class_id=C6/1");
+      const avg = (key) => {
+        const vals = d.students.map(s => s[key]).filter(v => v != null);
+        return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : "—";
+      };
+      const rows = d.students.map(s => `
+        <tr>
+          <td>${esc(s.student_no || "")}</td><td><b>${esc(s.display_name || "")}</b></td>
+          <td>${s.dictation_accuracy == null ? "—" : s.dictation_accuracy + "%"}</td>
+          <td>${s.homework_rate == null ? "—" : s.homework_rate + "%"}</td>
+          <td>${s.writing_count}</td>
+          <td>${s.writing_avg == null ? "—" : s.writing_avg}</td>
+          <td>${esc((s.last_active || "").slice(0, 16))}</td>
+        </tr>`).join("");
+      el.innerHTML = `
+        <h1>🀄 中文班看板（统编六上）</h1>
+        <div class="stat-grid">
+          <div class="stat"><div class="num">${d.students.length}</div><div class="lbl">学生数</div></div>
+          <div class="stat"><div class="num">${d.assignments}</div><div class="lbl">已布置作业</div></div>
+          <div class="stat"><div class="num">${avg("dictation_accuracy")}${avg("dictation_accuracy") === "—" ? "" : "%"}</div><div class="lbl">听写平均正确率</div></div>
+          <div class="stat"><div class="num">${avg("homework_rate")}${avg("homework_rate") === "—" ? "" : "%"}</div><div class="lbl">作业完成率</div></div>
+        </div>
+        <div class="card"><h2>学生概况</h2>
+          <table><tr><th>学号</th><th>姓名</th><th>听写正确率</th><th>作业完成率</th><th>作文篇数</th><th>作文均分</th><th>最近活跃</th></tr>
+          ${rows || "<tr><td colspan=7>暂无学生</td></tr>"}</table>
+        </div>`;
+    }
+
+    async function viewAssignments() {
+      const el = document.getElementById("view");
+      const [list, la] = await Promise.all([
+        api("/teacher/assignments?class_id=C6/1"),
+        api("/teacher/lesson_assign?class_id=C6/1"),
+      ]);
+      const lessonOpts = la.lessons.map(l => `<option value="${l.lesson_no}">第${l.lesson_no}课 ${esc(l.title)}</option>`).join("");
+      const rows = list.assignments.map(a => `
+        <tr>
+          <td>#${a.id}</td><td><b>${esc(a.title)}</b></td><td>${esc(a.type)}</td>
+          <td>${esc((a.due_at || "").slice(0, 16) || "—")}</td>
+          <td>${a.n_done} / ${a.n_students}</td>
+          <td><button class="btn-sm" data-view-sub="${a.id}">查看提交</button></td>
+        </tr>`).join("");
+      el.innerHTML = `
+        <h1>📝 作业管理（中文班）</h1>
+        <div class="card"><h2>布置作业</h2>
+          <div class="row">
+            <input id="a-title" placeholder="作业标题，如：第1课词语听写" style="flex:2">
+            <select id="a-type">
+              <option value="dictation">听写</option><option value="exercise">练习</option>
+              <option value="exam">随堂测</option><option value="writing">习作</option>
+              <option value="recitation">古诗文背诵</option>
+            </select>
+          </div>
+          <div class="row">
+            <select id="a-lesson">${lessonOpts}</select>
+            <input id="a-due" type="datetime-local">
+            <button class="btn-primary" id="a-create">布置</button>
+          </div>
+          <textarea id="a-note" placeholder="给学生的说明（可选）"></textarea>
+        </div>
+        <div class="card"><h2>已布置</h2>
+          <table><tr><th>#</th><th>标题</th><th>类型</th><th>截止</th><th>完成/人数</th><th></th></tr>
+          ${rows || "<tr><td colspan=6>还没有作业</td></tr>"}</table>
+        </div>
+        <div id="sub-box"></div>`;
+      document.getElementById("a-create").onclick = async () => {
+        const title = document.getElementById("a-title").value.trim();
+        if (!title) { alert("请填标题"); return; }
+        const type = document.getElementById("a-type").value;
+        const lesson = document.getElementById("a-lesson").value;
+        const due = document.getElementById("a-due").value;
+        await api("/teacher/assignments", { method: "POST", body: JSON.stringify({
+          class_id: "C6/1", title, type,
+          ref: { lesson_no: lesson },
+          instructions: document.getElementById("a-note").value,
+          due_at: due ? due.replace("T", " ") + ":00" : "",
+        }) });
+        viewAssignments();
+      };
+      el.querySelectorAll("[data-view-sub]").forEach(b => {
+        b.onclick = async () => {
+          const d = await api(`/teacher/assignment/${b.dataset.viewSub}/submissions`);
+          const st = { pending: "未交", submitted: "已交", late: "迟交", graded: "已批改", missing: "缺交" };
+          document.getElementById("sub-box").innerHTML = `
+            <div class="card"><h2>${esc(d.assignment.title)} · 提交情况</h2>
+            <table><tr><th>学号</th><th>姓名</th><th>状态</th><th>提交时间</th><th>得分</th></tr>
+            ${d.students.map(s => `<tr><td>${esc(s.student_no || "")}</td><td>${esc(s.display_name || "")}</td>
+              <td>${st[s.status] || "未交"}</td><td>${esc((s.submitted_at || "—").slice(0, 16))}</td>
+              <td>${s.score == null ? "—" : s.score}</td></tr>`).join("")}
+            </table></div>`;
+        };
+      });
+    }
+
+    async function viewDictation() {
+      const el = document.getElementById("view");
+      const d = await api("/teacher/dictation?class_id=C6/1");
+      const rows = d.students.map(s => `
+        <tr><td>${esc(s.display_name || "")}</td><td>${s.n}</td>
+        <td>${s.n ? Math.round((s.c || 0) / s.n * 100) + "%" : "—"}</td></tr>`).join("");
+      el.innerHTML = `
+        <h1>✍️ 听写与背诵（近 7 天）</h1>
+        <div class="stat-grid">
+          <div class="stat"><div class="num">${d.week.total}</div><div class="lbl">听写题次</div></div>
+          <div class="stat"><div class="num">${d.week.accuracy == null ? "—" : d.week.accuracy + "%"}</div><div class="lbl">平均正确率</div></div>
+        </div>
+        <div class="card"><h2>错得最多的字词</h2>
+          <table><tr><th>字词</th><th>错误次数</th><th>最近出错</th></tr>
+          ${d.top_wrong.map(w => `<tr><td><b>${esc(w.target)}</b></td><td>${w.wrong}</td><td>${esc((w.last || "").slice(0, 16))}</td></tr>`).join("") || "<tr><td colspan=3>近 7 天没有听写错误</td></tr>"}
+          </table></div>
+        <div class="card"><h2>学生明细</h2>
+          <table><tr><th>学生</th><th>题次</th><th>正确率</th></tr>${rows || "<tr><td colspan=3>暂无数据</td></tr>"}</table>
+        </div>`;
+    }
+
+    async function viewWritings() {
+      const el = document.getElementById("view");
+      const d = await api("/teacher/writings?class_id=C6/1");
+      const rows = d.writings.map(w => `
+        <tr>
+          <td>#${w.id}</td><td><b>${esc(w.display_name || "")}</b></td>
+          <td>${esc(w.task_title || "")}</td><td>第${w.draft_no}稿</td>
+          <td>${w.word_count || 0} 字</td>
+          <td>${w.ai_scores && w.ai_scores["总分"] != null ? w.ai_scores["总分"] : "—"}</td>
+          <td>${w.teacher_scores && w.teacher_scores["总分"] != null ? w.teacher_scores["总分"] : "—"}</td>
+          <td><span class="tag">${esc(w.status)}</span></td>
+          <td><button class="btn-sm" data-review="${w.id}">批阅</button></td>
+        </tr>`).join("");
+      el.innerHTML = `
+        <h1>📄 作文批改台</h1>
+        <div class="card"><table>
+          <tr><th>#</th><th>学生</th><th>题目</th><th>稿次</th><th>字数</th><th>AI 分</th><th>教师分</th><th>状态</th><th></th></tr>
+          ${rows || "<tr><td colspan=9>还没有提交的作文</td></tr>"}
+        </table></div>
+        <div id="review-box"></div>`;
+      el.querySelectorAll("[data-review]").forEach(b => {
+        const w = d.writings.find(x => String(x.id) === b.dataset.review);
+        b.onclick = () => {
+          const ai = w.ai_scores || {};
+          document.getElementById("review-box").innerHTML = `
+            <div class="card"><h2>${esc(w.display_name)} · ${esc(w.task_title)} · 第${w.draft_no}稿</h2>
+              <div style="max-height:320px;overflow:auto;white-space:pre-wrap;background:#fafafa;padding:12px;border-radius:8px;line-height:1.9">${esc(w.content || "")}</div>
+              ${w.ai_feedback ? `<div class="muted" style="margin-top:10px">AI 总评：${esc(w.ai_feedback.overall || "")}</div>` : ""}
+              <h2 style="margin-top:16px">教师评分（满分 50）</h2>
+              <div class="row">
+                <label>内容(15) <input id="rv-1" type="number" min="0" max="15" value="${ai["内容"] != null ? ai["内容"] : ""}"></label>
+                <label>结构(15) <input id="rv-2" type="number" min="0" max="15" value="${ai["结构"] != null ? ai["结构"] : ""}"></label>
+                <label>语言(15) <input id="rv-3" type="number" min="0" max="15" value="${ai["语言"] != null ? ai["语言"] : ""}"></label>
+                <label>规范(5) <input id="rv-4" type="number" min="0" max="5" value="${ai["规范"] != null ? ai["规范"] : ""}"></label>
+              </div>
+              <textarea id="rv-comment" placeholder="教师评语">${esc(w.teacher_comment || "")}</textarea>
+              <button class="btn-primary" id="rv-save">保存终评</button>
+            </div>`;
+          document.getElementById("rv-save").onclick = async () => {
+            const v = id => parseFloat(document.getElementById(id).value) || 0;
+            const scores = { "内容": v("rv-1"), "结构": v("rv-2"), "语言": v("rv-3"), "规范": v("rv-4") };
+            scores["总分"] = scores["内容"] + scores["结构"] + scores["语言"] + scores["规范"];
+            await api("/teacher/writing/review", { method: "POST", body: JSON.stringify({
+              submission_id: w.id, scores, comment: document.getElementById("rv-comment").value,
+            }) });
+            alert("已保存终评"); viewWritings();
+          };
+        };
+      });
+    }
+
     /* ---------- 10 数据导出 ---------- */
     async function viewExport() {
       const el = document.getElementById("view");
       const tables = ["logs", "students", "phase_config", "hint_events", "feedback_events", "avoidance_flags",
-        "handoff_events", "teacher_actions", "fidelity_checklists", "assessments", "oral_samples"];
+        "handoff_events", "teacher_actions", "fidelity_checklists", "assessments", "oral_samples",
+        "assignments", "assignment_submissions", "dictation_events", "recitation_events",
+        "writing_submissions", "writing_revisions", "reading_logs", "error_items"];
       const classes = (await api("/teacher/data")).classes;
       const classOpts = `<option value="">全部</option>` + classes.map(c => `<option value="${esc(c.class_id)}">${esc(c.class_id)}</option>`).join("");
       el.innerHTML = `

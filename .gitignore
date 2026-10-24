@@ -30,3 +30,6 @@ venv/
 
 # 编辑器/开发工具本地配置
 .claude/
+
+# 中文班内容构建中间产物（成品在 content.db）
+content/g6a/

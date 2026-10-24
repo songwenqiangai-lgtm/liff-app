@@ -16,9 +16,12 @@ except Exception:
 
 from database import get_conn, content_db, init_db, seed_items, DATA_DIR
 from llm import chat_json, chat_text
-from prompts import feedback_messages, ask_messages, pronounce_messages
+from prompts import (feedback_messages, ask_messages, pronounce_messages,
+                     feedback_messages_zh, writing_feedback_messages,
+                     ask_messages_zh, pronounce_messages_zh)
 import fidelity_config as FC
 import analytics as AN
+import asr as ASR
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "frontend"))
@@ -59,9 +62,26 @@ CLASS_CONTENT = {
     "M4/1": "M41", "M4/2": "FH1",
     "M5/1": "M51", "M5/2": "FH2",
     "M6/1": "M61", "M6/2": "FH2",
+    "C6/1": "G6A",   # 中文班 · 统编版六年级上册（母语语文）
 }
+
+# 中文班（母语语文）：界面模式、教学组织方式与时区
+NATIVE_CLASSES = {"C6/1"}
+CLASS_TZ = {"C6/1": "+8 hours"}        # 学生在中国大陆
+CLASS_MODE = {"C6/1": "teaching"}      # teaching=常规教学（模块全开）；research=研究阶段控制
+CLASS_LABELS = {"C6/1": "中文六年级 · 统编六上"}
+
+
+def is_native(class_id: str) -> bool:
+    return class_id in NATIVE_CLASSES
+
+
+def class_tz(class_id: str) -> str:
+    return CLASS_TZ.get(class_id, FC.TZ_OFFSET)
+
+
 # 交互部分（练习题/考试）只在 P1/P3 开放；静态部分（单词/课文/语法）始终可见
-INTERACTIVE_PHASES = {"P1", "P3"}
+INTERACTIVE_PHASES = {"P1", "P3", "N0"}
 SECTION_KEYS = ["vocab", "text", "grammar", "exercise", "exam"]
 
 
@@ -76,11 +96,42 @@ def assigned_lessons(class_id: str) -> set:
     return {r["lesson_no"] for r in rows}
 
 
-def phase_sections(phase: str) -> dict:
+def phase_sections(phase: str, class_id: str = "") -> dict:
+    # 中文班是常规教学：所有模块始终开放，不受研究阶段控制
+    if class_id and is_native(class_id):
+        return {k: True for k in ("vocab", "text", "grammar", "exercise",
+                                  "exam", "pronounce", "hanzi", "poem", "writing")}
     interactive = phase in INTERACTIVE_PHASES
     return {k: interactive for k in ("exercise", "exam")} | {
         "vocab": True, "text": True, "grammar": True,
     }
+
+
+def seed_native_classes():
+    """确保中文班在 classes / phase_config 里有配置（幂等）。"""
+    conn = get_conn()
+    for cid, book in CLASS_CONTENT.items():
+        native = is_native(cid)
+        conn.execute(
+            """INSERT INTO classes(class_id,grade,track,current_phase,phase_start_date,mode,ui_mode,tz_offset)
+               VALUES(?,?,?,?,date('now'),?,?,?)
+               ON CONFLICT(class_id) DO UPDATE SET
+                 mode=excluded.mode, ui_mode=excluded.ui_mode, tz_offset=excluded.tz_offset""",
+            (cid, _int_grade(cid), book, "N0" if native else "P0",
+             CLASS_MODE.get(cid, "research"),
+             "native" if native else "l2",
+             class_tz(cid)))
+        if native:
+            conn.execute(
+                """INSERT INTO phase_config(class_id,phase,ai_enabled,teacher_response_allowed,start_time)
+                   VALUES(?, 'N0', 1, 1, datetime('now'))
+                   ON CONFLICT(class_id) DO NOTHING""", (cid,))
+    conn.commit()
+
+
+def _int_grade(class_id: str):
+    m = re.search(r"(\d)", class_id or "")
+    return int(m.group(1)) if m else None
 
 def seed_demo_config():
     """检测到"全新数据库"时自动铺一份可用配置。
@@ -101,6 +152,8 @@ def seed_demo_config():
     first_lessons = {"M41": ["1", "2", "3"], "FH1": ["1", "2", "3"], "M51": ["16", "17", "18"],
                      "FH2": ["1", "2", "3"], "M61": ["13", "14", "15"]}
     for class_id, book in CLASS_CONTENT.items():
+        if is_native(class_id):
+            continue  # 中文班走常规教学配置，不铺研究阶段
         conn.execute(
             """INSERT INTO phase_config(class_id,phase,ai_enabled,teacher_response_allowed,start_time)
                VALUES(?,?,1,0,datetime('now'))
@@ -119,7 +172,8 @@ def seed_demo_config():
 app = FastAPI(title="Thai-Chinese Tutor LIFF")
 init_db()
 seed_items()
-seed_demo_config()
+seed_demo_config()   # 先铺二语班演示配置（中文班在其内部被跳过）
+seed_native_classes()  # 再注册 C6/1（N0 常规教学）
 
 
 # ---------- 通用工具 ----------
@@ -179,6 +233,24 @@ def log_teacher_action(action_type, target_class=None, detail=None, teacher_id="
         (teacher_id, action_type, target_class,
          json.dumps(detail, ensure_ascii=False) if detail else None),
     )
+    conn.commit()
+
+
+def upsert_error(student_id, source, ref_id, q_type=None, knowledge_tag=None):
+    """中文班错题本：同一道题/同一个字错误次数累加。"""
+    if ref_id is None:
+        return
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO error_items(student_id,source,ref_id,q_type,knowledge_tag)
+           VALUES(?,?,?,?,?)
+           ON CONFLICT(student_id,source,ref_id) DO UPDATE SET
+             wrong_count=wrong_count+1,
+             q_type=COALESCE(excluded.q_type, error_items.q_type),
+             knowledge_tag=COALESCE(excluded.knowledge_tag, error_items.knowledge_tag),
+             last_wrong_at=datetime('now'),
+             mastered=0""",
+        (student_id, source, ref_id, q_type, knowledge_tag))
     conn.commit()
 
 
@@ -524,18 +596,26 @@ def api_login(req: LoginReq):
                       f"已经 {gap} 天没来学中文啦，今天来复习一下吧～")
     log_event(student, "student_login")
     # F1：登录时懒生成本周报告（同周已生成则直接读缓存）
-    try:
-        AN.generate_weekly_report(student["id"])
-    except Exception:
-        pass  # 报告生成失败不能阻断登录
+    # 中文班用独立的语文周报（native_report），不生成二语班口径的周报
+    if not is_native(student["class_id"]):
+        try:
+            AN.generate_weekly_report(student["id"])
+        except Exception:
+            pass  # 报告生成失败不能阻断登录
     return {"token": make_token(student["id"]), "student": dict(student),
+            "ui_mode": "native" if is_native(student["class_id"]) else "l2",
+            "class_name": CLASS_LABELS.get(student["class_id"], student["class_id"]),
             "unread": AN.unread_count("student", student["id"])}
 
 
 @app.get("/api/me")
 def api_me(request: Request):
     sid = parse_token(request)
-    return dict(get_student(sid))
+    student = get_student(sid)
+    out = dict(student)
+    out["ui_mode"] = "native" if is_native(student["class_id"]) else "l2"
+    out["class_name"] = CLASS_LABELS.get(student["class_id"], student["class_id"])
+    return out
 
 
 # ---------- 个人资料 ----------
@@ -693,14 +773,19 @@ def _norm_answer(s: str) -> str:
 @app.post("/api/feedback")
 async def api_feedback(req: FeedbackReq, request: Request):
     student = get_student(parse_token(request))
+    native = is_native(student["class_id"])
     phase = current_phase(student["class_id"])
-    if req.module not in PHASE_MODULES.get(phase, []):
-        raise HTTPException(403, "module not available in current phase")
-    if req.module not in MODULES:
-        raise HTTPException(404, "unknown module")
-    item = content_db().execute(
-        "SELECT * FROM items WHERE id=? AND module=?", (req.item_id, req.module)
-    ).fetchone()
+    if native:
+        item = content_db().execute(
+            "SELECT * FROM items WHERE id=?", (req.item_id,)).fetchone()
+    else:
+        if req.module not in PHASE_MODULES.get(phase, []):
+            raise HTTPException(403, "module not available in current phase")
+        if req.module not in MODULES:
+            raise HTTPException(404, "unknown module")
+        item = content_db().execute(
+            "SELECT * FROM items WHERE id=? AND module=?", (req.item_id, req.module)
+        ).fetchone()
     if not item:
         raise HTTPException(404, "item not found")
 
@@ -712,15 +797,22 @@ async def api_feedback(req: FeedbackReq, request: Request):
         result = {
             "verdict": "correct",
             "error_type": "none",
+            "feedback_zh": "完全正确！答到点子上了。" if native else "",
             "feedback_th": "ถูกต้อง! ตอบตรงกับที่เรียนมาเลย เก่งมาก",
-            "hint1_th": "", "hint2_th": "",
+            "hint1_zh": "", "hint2_zh": "", "hint1_th": "", "hint2_th": "",
             "example_zh": "", "answer_zh": item["answer"] or "",
             "graded_by": "exact_match",
         }
         latency = 0
     else:
         t0 = time.time()
-        result = await chat_json(feedback_messages(dict(item), req.input_text, req.module), provider="mm")
+        if native:
+            result = await chat_json(
+                feedback_messages_zh(dict(item), req.input_text), provider="mm")
+            if not result.get("feedback_zh"):
+                result["feedback_zh"] = "AI 老师暂时没连上，先把你的答案记下来，稍后再看反馈。"
+        else:
+            result = await chat_json(feedback_messages(dict(item), req.input_text, req.module), provider="mm")
         result.setdefault("graded_by", "ai")
         latency = int((time.time() - t0) * 1000)
     log_event(student, "input_submit", req.module, req.item_id, req.input_text,
@@ -730,11 +822,17 @@ async def api_feedback(req: FeedbackReq, request: Request):
         "INSERT INTO feedback_events(student_id, feedback_time, adopted) VALUES(?, datetime('now'), ?)",
         (student["id"], "partial" if result.get("verdict") in ("partial", "incorrect") else "full"))
     conn.commit()
-    # 回避检测：极短作答
-    if len(req.input_text) < FC.SHORT_ANSWER_MIN:
+    # 中文班同时维护错题本（练习/测验主观题）
+    if native and result.get("verdict") in ("partial", "incorrect"):
+        upsert_error(student["id"], "exercise", req.item_id,
+                     item["q_type"] if "q_type" in item.keys() else None,
+                     item["tags"] if "tags" in item.keys() else None)
+    # 回避检测：极短作答（仅二语班研究口径）
+    if not native and len(req.input_text) < FC.SHORT_ANSWER_MIN:
         _add_flag(student["id"], "too_short_answer")
-    # 交接自动标记：T1 求助升级
-    maybe_create_t1(student, req.item_id, result.get("verdict", ""))
+    # 交接自动标记：T1 求助升级（仅二语班）
+    if not native:
+        maybe_create_t1(student, req.item_id, result.get("verdict", ""))
     return result
 
 
@@ -749,6 +847,32 @@ def api_hint(req: HintReq, request: Request):
         (student["id"], req.hint_level, req.item_id))
     conn.commit()
     return {"ok": True}
+
+
+class AsrReq(BaseModel):
+    audio_b64: str
+    sample_rate: int = 16000
+
+
+@app.post("/api/asr")
+async def api_asr(req: AsrReq, request: Request):
+    """录音转文字。服务器端识别，不依赖浏览器语音 API（LINE 里也能用）。"""
+    student = get_student(parse_token(request))
+    raw = req.audio_b64 or ""
+    if "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except Exception:
+        raise HTTPException(400, "音频数据有误，请重新录音")
+    if len(data) < 1000:
+        raise HTTPException(400, "录音太短，请按住说完一整句")
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "录音太长（最多 10MB）")
+    text = await ASR.transcribe(data, rate=req.sample_rate or 16000)
+    log_event(student, "asr_transcribe", input_text=text or None,
+              detail={"bytes": len(data)})
+    return {"text": text}
 
 
 @app.get("/api/progress")
@@ -793,10 +917,37 @@ def api_session_start(request: Request):
 @app.get("/api/lessons")
 def api_lessons(request: Request):
     student = get_student(parse_token(request))
-    phase = current_phase(student["class_id"])
+    class_id = student["class_id"]
+    phase = current_phase(class_id)
     book = student_book(student)
     conn = content_db()
-    assigned = assigned_lessons(student["class_id"])
+    assigned = assigned_lessons(class_id)
+
+    if is_native(class_id):
+        # 中文班：常规教学，全部课次可见；按单元分组返回
+        rows = conn.execute(
+            """SELECT lesson_no, title, unit, lesson_type FROM lessons
+               WHERE book=? ORDER BY CAST(lesson_no AS INTEGER)""", (book,)).fetchall()
+        units = {}
+        for r in rows:
+            u = r["unit"] or 0
+            units.setdefault(u, []).append({
+                "lesson_no": r["lesson_no"], "title": r["title"],
+                "type": r["lesson_type"] or "reading"})
+        writings = conn.execute(
+            "SELECT id, unit, title FROM writing_tasks WHERE book=? ORDER BY unit, id",
+            (book,)).fetchall()
+        wmap = {}
+        for w in writings:
+            wmap.setdefault(w["unit"] or 0, []).append(dict(w))
+        return {
+            "book": book, "ui_mode": "native",
+            "sections": phase_sections(phase, class_id),
+            "units": [{"unit": u, "lessons": ls, "writings": wmap.get(u, [])}
+                      for u, ls in sorted(units.items())],
+            "lessons": [dict(r) for r in rows],   # 兼容旧前端
+        }
+
     if assigned:
         ph = ",".join("?" * len(assigned))
         lessons = conn.execute(
@@ -805,18 +956,78 @@ def api_lessons(request: Request):
         ).fetchall()
     else:
         lessons = []  # 教师未分配 → 学生看不到任何课
-    return {"book": book, "sections": phase_sections(phase),
+    return {"book": book, "ui_mode": "l2", "sections": phase_sections(phase),
             "lessons": [dict(r) for r in lessons]}
 
 
 @app.get("/api/lesson")
 def api_lesson(request: Request, lesson: str):
     student = get_student(parse_token(request))
-    phase = current_phase(student["class_id"])
-    if lesson not in assigned_lessons(student["class_id"]):
+    class_id = student["class_id"]
+    phase = current_phase(class_id)
+    assigned = assigned_lessons(class_id)
+    if not is_native(class_id) and lesson not in assigned:
         raise HTTPException(403, "lesson not assigned")
     book = student_book(student)
     conn = content_db()
+
+    if is_native(class_id):
+        lesson_row = conn.execute(
+            "SELECT lesson_no, title, unit FROM lessons WHERE book=? AND lesson_no=?",
+            (book, lesson)).fetchone()
+        if not lesson_row:
+            raise HTTPException(404, "lesson not found")
+        unit = lesson_row["unit"]
+        hanzi = [dict(r) for r in conn.execute(
+            """SELECT id, char, pinyin, radical, strokes, structure, words,
+                      require_write, difficulty_tags, note_zh
+               FROM hanzi WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+        vocab = [dict(r) for r in conn.execute(
+            """SELECT id, word, pinyin, meaning_zh, example_zh, note_zh
+               FROM vocab WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+        text_row = conn.execute(
+            "SELECT id, title, body_zh FROM texts WHERE book=? AND lesson_no=?",
+            (book, lesson)).fetchone()
+        text = dict(text_row) if text_row else None
+        grammar = [dict(r) for r in conn.execute(
+            """SELECT point, explanation_zh, example_zh FROM grammar_points
+               WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+        exercises = [dict(r) for r in conn.execute(
+            """SELECT id, module, prompt_zh, answer, explanation_th, q_type,
+                      score, passage_id, tags
+               FROM items WHERE book=? AND lesson_no=? ORDER BY module, id""",
+            (book, lesson)).fetchall()]
+        exam = [dict(r) for r in conn.execute(
+            """SELECT id, question_zh, option_a, option_b, option_c, option_d,
+                      score, q_type, passage_id
+               FROM exams WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+        poems = [dict(r) for r in conn.execute(
+            """SELECT id, title, author, dynasty, genre, body, notes_json,
+                      translation, recite_required, dictation_points
+               FROM poems WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+        for p in poems:
+            try:
+                p["notes"] = json.loads(p.pop("notes_json") or "[]")
+            except Exception:
+                p["notes"] = []
+        writing = []
+        if unit:
+            writing = [dict(r) for r in conn.execute(
+                "SELECT id, unit, title, prompt, requirements, min_words FROM writing_tasks "
+                "WHERE book=? AND unit=? ORDER BY id", (book, unit)).fetchall()]
+        return {
+            "lesson_no": lesson, "title": lesson_row["title"], "unit": unit,
+            "book": book, "ui_mode": "native",
+            "sections": phase_sections(phase, class_id),
+            "hanzi": hanzi, "vocab": vocab, "text": text, "grammar": grammar,
+            "exercises": exercises, "exam": exam, "poems": poems, "writing": writing,
+        }
+
     vocab = []
     for r in conn.execute(
             "SELECT id,word,pinyin,meaning_th,example_zh FROM vocab WHERE book=? AND lesson_no=? ORDER BY id",
@@ -854,10 +1065,11 @@ class ExamSubmitReq(BaseModel):
 @app.post("/api/exam/submit")
 def api_exam_submit(req: ExamSubmitReq, request: Request):
     student = get_student(parse_token(request))
+    native = is_native(student["class_id"])
     phase = current_phase(student["class_id"])
-    if phase not in INTERACTIVE_PHASES:
+    if not native and phase not in INTERACTIVE_PHASES:
         raise HTTPException(403, "exam not available in current phase")
-    if req.lesson_no not in assigned_lessons(student["class_id"]):
+    if not native and req.lesson_no not in assigned_lessons(student["class_id"]):
         raise HTTPException(403, "lesson not assigned")
     book = student_book(student)
     conn = content_db()
@@ -874,8 +1086,13 @@ def api_exam_submit(req: ExamSubmitReq, request: Request):
         results.append({
             "exam_id": r["id"], "question_zh": r["question_zh"],
             "chosen": chosen, "correct_letter": r["correct"],
-            "is_correct": correct, "explanation_th": r["explanation_th"],
+            "is_correct": correct,
+            "explanation": r["explanation_th"], "explanation_th": r["explanation_th"],
+            "q_type": r["q_type"] if "q_type" in r.keys() else None,
         })
+        if native and not correct and chosen:
+            upsert_error(student["id"], "exam", r["id"],
+                         r["q_type"] if "q_type" in r.keys() else None, None)
     total = len(rows)
     score = round(correct_count / total * 100) if total else 0
     log_event(student, "exam_submit", input_text=None,
@@ -893,17 +1110,22 @@ class AskReq(BaseModel):
 @app.post("/api/ask")
 async def api_ask(req: AskReq, request: Request):
     student = get_student(parse_token(request))
+    native = is_native(student["class_id"])
     phase = current_phase(student["class_id"])
-    if phase not in INTERACTIVE_PHASES:
+    if not native and phase not in INTERACTIVE_PHASES:
         raise HTTPException(403, "AI not available in current phase")
     q = req.question.strip()
     if not q:
         raise HTTPException(400, "empty question")
-    # 分流：中文提问用 MiniMax，泰/英用 DeepSeek
-    provider = "mm" if req.lang == "zh" else None
-    answer = await chat_text(ask_messages(q, req.lang), provider=provider)
+    if native:
+        # 中文班：始终中文回答，走中文模型
+        answer = await chat_text(ask_messages_zh(q), provider="mm")
+    else:
+        # 分流：中文提问用 MiniMax，泰/英用 DeepSeek
+        provider = "mm" if req.lang == "zh" else None
+        answer = await chat_text(ask_messages(q, req.lang), provider=provider)
     log_event(student, "ask_question", input_text=q,
-              response_json={"lang": req.lang, "answer": answer})
+              response_json={"lang": "zh" if native else req.lang, "answer": answer})
     return {"answer": answer}
 
 
@@ -915,12 +1137,15 @@ class PronounceReq(BaseModel):
 @app.post("/api/pronounce")
 async def api_pronounce(req: PronounceReq, request: Request):
     student = get_student(parse_token(request))
+    native = is_native(student["class_id"])
     phase = current_phase(student["class_id"])
-    if phase not in INTERACTIVE_PHASES:
+    if not native and phase not in INTERACTIVE_PHASES:
         raise HTTPException(403, "AI not available in current phase")
     if not req.target_text.strip():
         raise HTTPException(400, "empty target")
-    feedback = await chat_text(pronounce_messages(req.target_text, req.recognized_text), provider="mm")
+    msgs = (pronounce_messages_zh(req.target_text, req.recognized_text)
+            if native else pronounce_messages(req.target_text, req.recognized_text))
+    feedback = await chat_text(msgs, provider="mm")
     log_event(student, "pronounce_check",
               input_text=req.recognized_text,
               response_json={"target": req.target_text, "feedback": feedback})
@@ -1412,6 +1637,15 @@ EXPORT_TABLES = {
     "fidelity_checklists": {"ts": "filled_at", "has_class": True},
     "assessments": {"ts": "created_at", "has_class": False},
     "oral_samples": {"ts": "created_at", "has_class": False},
+    # 中文班
+    "assignments": {"ts": "created_at", "has_class": True},
+    "assignment_submissions": {"ts": "updated_at", "has_class": False},
+    "dictation_events": {"ts": "created_at", "has_class": False},
+    "recitation_events": {"ts": "created_at", "has_class": False},
+    "writing_submissions": {"ts": "created_at", "has_class": False},
+    "writing_revisions": {"ts": "created_at", "has_class": False},
+    "reading_logs": {"ts": "created_at", "has_class": False},
+    "error_items": {"ts": "last_wrong_at", "has_class": False},
 }
 
 
@@ -1696,6 +1930,777 @@ def teacher_offline_task(req: OfflineTaskReq, request: Request):
                                                      "task_type": req.task_type,
                                                      "score": req.score})
     return {"ok": True}
+
+
+# ============================================================
+# 中文班（母语语文）专属接口
+# ============================================================
+
+def _parse_json(s, default):
+    if not s:
+        return default
+    try:
+        return json.loads(s)
+    except Exception:
+        return default
+
+
+def _need_native(student):
+    if not is_native(student["class_id"]):
+        raise HTTPException(403, "native class only")
+
+
+# ---------- 听写 ----------
+
+@app.get("/api/dictation")
+def api_dictation(request: Request, lesson: str, scope: str = "all"):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    book = student_book(student)
+    conn = content_db()
+    chars, words = [], []
+    if scope in ("all", "chars"):
+        chars = [dict(r) for r in conn.execute(
+            """SELECT id, char, pinyin, radical, strokes, structure, words, note_zh
+               FROM hanzi WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+    if scope in ("all", "words"):
+        words = [dict(r) for r in conn.execute(
+            """SELECT id, word, pinyin, meaning_zh FROM vocab
+               WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
+    return {"lesson_no": lesson, "chars": chars, "words": words}
+
+
+class DictationSubmitReq(BaseModel):
+    lesson_no: str
+    scope: str = "words"
+    mode: str = "pinyin2word"
+    results: list  # [{target,target_type,ref_id,input_text,is_correct,wrong_part,duration_ms}]
+
+
+@app.post("/api/dictation/submit")
+def api_dictation_submit(req: DictationSubmitReq, request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    conn = get_conn()
+    total = correct = 0
+    for r in req.results:
+        ok = 1 if r.get("is_correct") else 0
+        total += 1
+        correct += ok
+        conn.execute(
+            """INSERT INTO dictation_events(student_id,lesson_no,target,target_type,
+               ref_id,mode,input_text,is_correct,wrong_part,duration_ms)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (student["id"], req.lesson_no, r.get("target", ""),
+             r.get("target_type", "word"), r.get("ref_id"), req.mode,
+             r.get("input_text", ""), ok, r.get("wrong_part", ""),
+             r.get("duration_ms")))
+        if not ok:
+            src = "dictation_word" if r.get("target_type") == "word" else "dictation"
+            upsert_error(student["id"], src, r.get("ref_id"),
+                         "字词", r.get("target", ""))
+    conn.commit()
+    score = round(correct / total * 100) if total else 0
+    log_event(student, "dictation_submit", module="dictation",
+              response_json={"lesson_no": req.lesson_no, "mode": req.mode,
+                             "total": total, "correct": correct, "score": score})
+    return {"total": total, "correct": correct, "score": score}
+
+
+# ---------- 古诗文背诵 / 默写 ----------
+
+@app.get("/api/poems")
+def api_poems(request: Request, unit: int = 0, lesson: str = ""):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    book = student_book(student)
+    sql = "SELECT * FROM poems WHERE book=?"
+    args = [book]
+    if unit:
+        sql += " AND unit=?"; args.append(unit)
+    if lesson:
+        sql += " AND lesson_no=?"; args.append(lesson)
+    sql += " ORDER BY unit, lesson_no, id"
+    rows = content_db().execute(sql, args).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["notes"] = _parse_json(d.pop("notes_json", None), [])
+        stat = get_conn().execute(
+            """SELECT MAX(score) best, COUNT(*) attempts FROM recitation_events
+               WHERE student_id=? AND poem_id=?""",
+            (student["id"], d["id"])).fetchone()
+        d["best_score"] = stat["best"]
+        d["attempts"] = stat["attempts"] or 0
+        out.append(d)
+    return {"poems": out}
+
+
+class RecitationReq(BaseModel):
+    poem_id: int
+    mode: str = "full_dictation"
+    input_text: str = ""
+
+
+def _norm_text(s: str) -> str:
+    return re.sub(r"[\s，。！？、；：“”‘’（）《》…—·,.!?;:\"'()\[\]]", "", s or "")
+
+
+@app.post("/api/recitation/submit")
+def api_recitation_submit(req: RecitationReq, request: Request):
+    import difflib
+    student = get_student(parse_token(request))
+    _need_native(student)
+    poem = content_db().execute("SELECT * FROM poems WHERE id=?", (req.poem_id,)).fetchone()
+    if not poem:
+        raise HTTPException(404, "poem not found")
+    target = _norm_text(poem["body"])
+    mine = _norm_text(req.input_text)
+    ratio = difflib.SequenceMatcher(None, target, mine).ratio() if target else 0
+    score = round(ratio * 100, 1)
+    # 找出漏写的字（按字频差集）
+    from collections import Counter
+    tc, mc = Counter(target), Counter(mine)
+    missing = []
+    for ch, n in tc.items():
+        if mc.get(ch, 0) < n:
+            missing.append(ch)
+    detail = {"target_len": len(target), "input_len": len(mine),
+              "missing_chars": missing[:50], "ratio": ratio}
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO recitation_events(student_id,poem_id,lesson_no,mode,score,detail_json)
+           VALUES(?,?,?,?,?,?)""",
+        (student["id"], req.poem_id, poem["lesson_no"], req.mode, score,
+         json.dumps(detail, ensure_ascii=False)))
+    conn.commit()
+    if score < 80:
+        upsert_error(student["id"], "recitation", req.poem_id, "古诗文默写", poem["title"])
+    log_event(student, "recitation_submit", module="recitation",
+              response_json={"poem_id": req.poem_id, "mode": req.mode, "score": score})
+    return {"score": score, "detail": detail}
+
+
+# ---------- 习作 ----------
+
+@app.get("/api/writing/tasks")
+def api_writing_tasks(request: Request, unit: int = 0):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    book = student_book(student)
+    sql = "SELECT * FROM writing_tasks WHERE book=?"
+    args = [book]
+    if unit:
+        sql += " AND unit=?"; args.append(unit)
+    sql += " ORDER BY unit, id"
+    rows = content_db().execute(sql, args).fetchall()
+    return {"tasks": [dict(r) for r in rows]}
+
+
+@app.get("/api/writing/task/{tid}")
+def api_writing_task(tid: int, request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    task = content_db().execute(
+        "SELECT * FROM writing_tasks WHERE id=?", (tid,)).fetchone()
+    if not task:
+        raise HTTPException(404, "task not found")
+    d = dict(task)
+    d["rubric"] = _parse_json(d.get("rubric_json"), [])
+    d["tips"] = _parse_json(d.get("tips_json"), [])
+    mine = [dict(r) for r in get_conn().execute(
+        """SELECT id, draft_no, word_count, status, ai_scores_json,
+                  teacher_scores_json, teacher_comment, submitted_at, created_at
+           FROM writing_submissions WHERE student_id=? AND task_id=?
+           ORDER BY draft_no""", (student["id"], tid)).fetchall()]
+    return {"task": d, "mine": mine}
+
+
+class WritingSaveReq(BaseModel):
+    task_id: int
+    content: str = ""
+    outline: str = ""
+    draft_no: int = 1
+    duration_seconds: int = 0
+
+
+@app.post("/api/writing/save")
+def api_writing_save(req: WritingSaveReq, request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    wc = len(_norm_text(req.content))
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT id, status FROM writing_submissions
+           WHERE student_id=? AND task_id=? AND draft_no=?""",
+        (student["id"], req.task_id, req.draft_no)).fetchone()
+    if row and row["status"] == "draft":
+        conn.execute(
+            """UPDATE writing_submissions SET content=?, outline=?, word_count=?,
+               duration_seconds=?, created_at=datetime('now') WHERE id=?""",
+            (req.content, req.outline, wc, req.duration_seconds, row["id"]))
+        sid = row["id"]
+    else:
+        cur = conn.execute(
+            """INSERT INTO writing_submissions(student_id,task_id,draft_no,outline,content,
+               word_count,duration_seconds,status) VALUES(?,?,?,?,?,?,?, 'draft')""",
+            (student["id"], req.task_id, req.draft_no, req.outline, req.content,
+             wc, req.duration_seconds))
+        sid = cur.lastrowid
+    conn.commit()
+    return {"id": sid, "word_count": wc}
+
+
+class WritingSubmitReq(BaseModel):
+    task_id: int
+    assignment_id: Optional[int] = None
+    content: str
+    outline: str = ""
+    draft_no: int = 1
+    duration_seconds: int = 0
+
+
+@app.post("/api/writing/submit")
+async def api_writing_submit(req: WritingSubmitReq, request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    task = content_db().execute(
+        "SELECT * FROM writing_tasks WHERE id=?", (req.task_id,)).fetchone()
+    if not task:
+        raise HTTPException(404, "task not found")
+    wc = len(_norm_text(req.content))
+    if wc < 50:
+        raise HTTPException(400, "作文太短了，再写一些吧")
+
+    t0 = time.time()
+    fb = await chat_json(writing_feedback_messages(dict(task), req.content), provider="mm")
+    latency = int((time.time() - t0) * 1000)
+    ok = isinstance(fb.get("scores"), dict) and "总分" in fb.get("scores", {})
+
+    conn = get_conn()
+    # 同稿次已存在则更新，否则插入
+    row = conn.execute(
+        """SELECT id FROM writing_submissions
+           WHERE student_id=? AND task_id=? AND draft_no=?""",
+        (student["id"], req.task_id, req.draft_no)).fetchone()
+    scores_json = json.dumps(fb.get("scores") or {}, ensure_ascii=False)
+    fb_json = json.dumps(fb, ensure_ascii=False) if ok else None
+    status = "ai_reviewed" if ok else "submitted"
+    if row:
+        sid = row["id"]
+        conn.execute(
+            """UPDATE writing_submissions SET content=?, outline=?, word_count=?,
+               duration_seconds=?, ai_scores_json=?, ai_feedback_json=?, status=?,
+               submitted_at=datetime('now'), created_at=datetime('now') WHERE id=?""",
+            (req.content, req.outline, wc, req.duration_seconds, scores_json,
+             fb_json, status, sid))
+    else:
+        cur = conn.execute(
+            """INSERT INTO writing_submissions(student_id,task_id,assignment_id,draft_no,
+               outline,content,word_count,duration_seconds,ai_scores_json,ai_feedback_json,
+               status,submitted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
+            (student["id"], req.task_id, req.assignment_id, req.draft_no, req.outline,
+             req.content, wc, req.duration_seconds, scores_json, fb_json, status))
+        sid = cur.lastrowid
+    conn.commit()
+    if req.assignment_id:
+        _mark_homework_submitted(student, req.assignment_id,
+                                 (fb.get("scores") or {}).get("总分"))
+    log_event(student, "writing_submit", module="writing",
+              ai_latency_ms=latency,
+              response_json={"task_id": req.task_id, "draft_no": req.draft_no,
+                             "word_count": wc, "ok": ok})
+    return {"id": sid, "word_count": wc, "ok": ok, "feedback": fb if ok else None,
+            "message": None if ok else "作文已保存，AI 批改暂时不可用，老师会尽快批阅。"}
+
+
+@app.get("/api/writing/mine")
+def api_writing_mine(request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    rows = get_conn().execute(
+        """SELECT * FROM writing_submissions WHERE student_id=?
+           ORDER BY created_at DESC LIMIT 50""",
+        (student["id"],)).fetchall()
+    # writing_tasks 在内容库，跨库在 Python 侧合并
+    cdb = content_db()
+    tasks = {r["id"]: dict(r) for r in cdb.execute(
+        "SELECT id, title, unit, min_words FROM writing_tasks").fetchall()}
+    out = []
+    for r in rows:
+        d = dict(r)
+        t = tasks.get(d.get("task_id"), {})
+        d["title"] = t.get("title")
+        d["unit"] = t.get("unit")
+        d["min_words"] = t.get("min_words")
+        d["ai_scores"] = _parse_json(d.pop("ai_scores_json", None), None)
+        d["teacher_scores"] = _parse_json(d.pop("teacher_scores_json", None), None)
+        d["ai_feedback"] = _parse_json(d.pop("ai_feedback_json", None), None)
+        out.append(d)
+    return {"submissions": out}
+
+
+# ---------- 作业 ----------
+
+@app.get("/api/homework")
+def api_homework(request: Request):
+    student = get_student(parse_token(request))
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT a.*, s.status sub_status, s.submitted_at, s.score, s.detail_json
+           FROM assignments a
+           LEFT JOIN assignment_submissions s
+             ON s.assignment_id = a.id AND s.student_id = ?
+           WHERE a.class_id=? AND datetime(a.publish_at) <= datetime('now')
+           ORDER BY COALESCE(a.due_at, a.publish_at) ASC, a.id DESC""",
+        (student["id"], student["class_id"])).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["ref"] = _parse_json(d.pop("ref_json", None), {})
+        d.pop("detail_json", None)
+        d["status"] = d.get("sub_status") or "pending"
+        d["overdue"] = bool(d.get("due_at")) and d["status"] == "pending" and \
+            d["due_at"] < datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        out.append(d)
+    return {"assignments": out}
+
+
+@app.get("/api/homework/{aid}")
+def api_homework_detail(aid: int, request: Request):
+    student = get_student(parse_token(request))
+    conn = get_conn()
+    a = conn.execute("SELECT * FROM assignments WHERE id=? AND class_id=?",
+                     (aid, student["class_id"])).fetchone()
+    if not a:
+        raise HTTPException(404, "assignment not found")
+    d = dict(a)
+    d["ref"] = _parse_json(d.pop("ref_json", None), {})
+    sub = conn.execute(
+        "SELECT * FROM assignment_submissions WHERE assignment_id=? AND student_id=?",
+        (aid, student["id"])).fetchone()
+    d["submission"] = dict(sub) if sub else None
+    return d
+
+
+class HomeworkSubmitReq(BaseModel):
+    score: Optional[float] = None
+    detail: dict = {}
+
+
+def _mark_homework_submitted(student, assignment_id: int, score=None):
+    conn = get_conn()
+    a = conn.execute("SELECT due_at FROM assignments WHERE id=?", (assignment_id,)).fetchone()
+    status = "submitted"
+    if a and a["due_at"] and a["due_at"] < datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"):
+        status = "late"
+    conn.execute(
+        """INSERT INTO assignment_submissions(assignment_id,student_id,status,submitted_at,score)
+           VALUES(?,?,?,datetime('now'),?)
+           ON CONFLICT(assignment_id,student_id) DO UPDATE SET
+             status=excluded.status, submitted_at=excluded.submitted_at,
+             score=COALESCE(excluded.score, assignment_submissions.score),
+             updated_at=datetime('now')""",
+        (assignment_id, student["id"], status, score))
+    conn.commit()
+
+
+@app.post("/api/homework/{aid}/submit")
+def api_homework_submit(aid: int, req: HomeworkSubmitReq, request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    a = get_conn().execute("SELECT * FROM assignments WHERE id=? AND class_id=?",
+                           (aid, student["class_id"])).fetchone()
+    if not a:
+        raise HTTPException(404, "assignment not found")
+    _mark_homework_submitted(student, aid, req.score)
+    log_event(student, "homework_submit", module=a["type"],
+              response_json={"assignment_id": aid, "score": req.score})
+    return {"ok": True}
+
+
+# ---------- 错题本 ----------
+
+@app.get("/api/errors")
+def api_errors(request: Request, limit: int = 100):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    rows = get_conn().execute(
+        """SELECT * FROM error_items WHERE student_id=? AND mastered=0
+           ORDER BY last_wrong_at DESC LIMIT ?""",
+        (student["id"], limit)).fetchall()
+    items, exams, hanzi, poems, words = {}, {}, {}, {}, {}
+    ids = {"exercise": set(), "exam": set(), "dictation": set(),
+           "dictation_word": set(), "recitation": set()}
+    for r in rows:
+        if r["source"] in ids and r["ref_id"] is not None:
+            ids[r["source"]].add(r["ref_id"])
+    cdb = content_db()
+
+    def fetch(table, id_set, key="id"):
+        if not id_set:
+            return {}
+        ph = ",".join("?" * len(id_set))
+        return {x["id"]: dict(x) for x in cdb.execute(
+            f"SELECT * FROM {table} WHERE id IN ({ph})", list(id_set)).fetchall()}
+
+    items = fetch("items", ids["exercise"])
+    exams = fetch("exams", ids["exam"])
+    hanzi = fetch("hanzi", ids["dictation"])
+    poems = fetch("poems", ids["recitation"])
+    words = fetch("vocab", ids["dictation_word"])
+    out = []
+    for r in rows:
+        d = dict(r)
+        ref = None
+        if r["source"] == "exercise" and r["ref_id"] in items:
+            it = items[r["ref_id"]]
+            ref = {"text": it["prompt_zh"], "q_type": it.get("q_type"),
+                   "lesson": it["lesson_no"], "answer": it.get("answer"),
+                   "href": f"lesson.html?lesson={it['lesson_no']}&module=exercise"}
+        elif r["source"] == "exam" and r["ref_id"] in exams:
+            ex = exams[r["ref_id"]]
+            ref = {"text": ex["question_zh"], "q_type": ex.get("q_type"),
+                   "lesson": ex["lesson_no"], "answer": ex.get("correct"),
+                   "href": f"lesson.html?lesson={ex['lesson_no']}&module=exam"}
+        elif r["source"] == "dictation" and r["ref_id"] in hanzi:
+            hz = hanzi[r["ref_id"]]
+            ref = {"text": hz["char"], "pinyin": hz["pinyin"], "words": hz.get("words"),
+                   "lesson": hz["lesson_no"],
+                   "href": f"lesson.html?lesson={hz['lesson_no']}&module=hanzi"}
+        elif r["source"] == "dictation_word" and r["ref_id"] in words:
+            wd = words[r["ref_id"]]
+            ref = {"text": wd["word"], "pinyin": wd["pinyin"],
+                   "lesson": wd["lesson_no"],
+                   "href": f"lesson.html?lesson={wd['lesson_no']}&module=hanzi"}
+        elif r["source"] == "recitation" and r["ref_id"] in poems:
+            pm = poems[r["ref_id"]]
+            ref = {"text": pm["title"], "lesson": pm.get("lesson_no"),
+                   "href": f"lesson.html?lesson={pm.get('lesson_no')}&module=poem"}
+        d["ref"] = ref
+        out.append(d)
+    return {"errors": out}
+
+
+@app.post("/api/errors/{eid}/master")
+def api_error_master(eid: int, request: Request):
+    student = get_student(parse_token(request))
+    conn = get_conn()
+    conn.execute("UPDATE error_items SET mastered=1 WHERE id=? AND student_id=?",
+                 (eid, student["id"]))
+    conn.commit()
+    return {"ok": True}
+
+
+# ---------- 语文周报 ----------
+
+@app.get("/api/native_report")
+def api_native_report(request: Request):
+    student = get_student(parse_token(request))
+    _need_native(student)
+    tz = class_tz(student["class_id"])
+    conn = get_conn()
+    # 本周起止（按班级时区）
+    row = conn.execute(
+        f"""SELECT date('now','{tz}','weekday 0','-6 days') ws,
+                   date('now','{tz}') we""").fetchone()
+    start, end = row["ws"], row["we"]
+    d = f"date(created_at,'{tz}')"
+
+    logs = conn.execute(
+        f"""SELECT module, response_json, {d} day FROM logs
+            WHERE student_id=? AND {d} BETWEEN ? AND ?""",
+        (student["id"], start, end)).fetchall()
+    submits = accuracy = None
+    correct = partial = graded = 0
+    days = set()
+    by_type = {}
+    for r in logs:
+        days.add(r["day"])
+        if r["module"] == "dictation":
+            continue
+        if (r["response_json"] or "").find('"verdict"') >= 0:
+            try:
+                v = (json.loads(r["response_json"]) or {}).get("verdict")
+            except Exception:
+                v = None
+            if v in ("correct", "partial", "incorrect"):
+                graded += 1
+                if v == "correct":
+                    correct += 1
+                elif v == "partial":
+                    partial += 0.5
+    if graded:
+        accuracy = round((correct + partial) / graded * 100)
+
+    dic = conn.execute(
+        f"""SELECT COUNT(*) n, SUM(is_correct) c FROM dictation_events
+            WHERE student_id=? AND {d} BETWEEN ? AND ?""",
+        (student["id"], start, end)).fetchone()
+    dic_acc = round((dic["c"] or 0) / dic["n"] * 100) if dic["n"] else None
+
+    rec = conn.execute(
+        f"""SELECT COUNT(*) n, AVG(score) s FROM recitation_events
+            WHERE student_id=? AND {d} BETWEEN ? AND ?""",
+        (student["id"], start, end)).fetchone()
+
+    wr = conn.execute(
+        f"""SELECT COUNT(*) n, AVG(json_extract(ai_scores_json,'$.总分')) s
+            FROM writing_submissions
+            WHERE student_id=? AND status!='draft' AND {d} BETWEEN ? AND ?""",
+        (student["id"], start, end)).fetchone()
+
+    hw = conn.execute(
+        f"""SELECT COUNT(*) n, SUM(CASE WHEN s.status IN ('submitted','late','graded') THEN 1 ELSE 0 END) done
+            FROM assignments a LEFT JOIN assignment_submissions s
+              ON s.assignment_id=a.id AND s.student_id=?
+            WHERE a.class_id=? AND COALESCE(date(a.due_at,'{tz}'), date(a.publish_at,'{tz}')) BETWEEN ? AND ?""",
+        (student["id"], student["class_id"], start, end)).fetchone()
+
+    weak = conn.execute(
+        """SELECT q_type, knowledge_tag, SUM(wrong_count) n FROM error_items
+           WHERE student_id=? AND mastered=0 GROUP BY q_type, knowledge_tag
+           ORDER BY n DESC LIMIT 5""", (student["id"],)).fetchall()
+
+    all_dic = conn.execute(
+        """SELECT COUNT(*) n, SUM(is_correct) c FROM dictation_events WHERE student_id=?""",
+        (student["id"],)).fetchone()
+    all_write = conn.execute(
+        """SELECT AVG(json_extract(ai_scores_json,'$.总分')) s FROM writing_submissions
+           WHERE student_id=? AND ai_scores_json IS NOT NULL""",
+        (student["id"],)).fetchone()
+    all_rec = conn.execute(
+        """SELECT AVG(score) s FROM recitation_events WHERE student_id=?""",
+        (student["id"],)).fetchone()
+    # 分模块（按 items 的 module 聚合判定）
+    per_module = {}
+    for r in logs:
+        if not r["response_json"] or '"verdict"' not in (r["response_json"] or ""):
+            continue
+        try:
+            v = (json.loads(r["response_json"]) or {}).get("verdict")
+        except Exception:
+            continue
+        slot = per_module.setdefault(r["module"] or "其他", [0, 0])
+        if v in ("correct", "partial", "incorrect"):
+            slot[1] += 1
+            slot[0] += 1 if v == "correct" else (0.5 if v == "partial" else 0)
+
+    def rate(m):
+        s = per_module.get(m)
+        return round(s[0] / s[1] * 100) if s and s[1] else None
+
+    radar = [
+        {"key": "literacy", "label": "识字写字",
+         "value": round((all_dic["c"] or 0) / all_dic["n"] * 100) if all_dic["n"] else None},
+        {"key": "language", "label": "词句运用", "value": rate("词句段")},
+        {"key": "reading", "label": "阅读理解", "value": rate("练习")},
+        {"key": "writing", "label": "习作表达",
+         "value": round(all_write["s"] / 50 * 100) if all_write["s"] else None},
+        {"key": "recitation", "label": "积累背诵",
+         "value": round(all_rec["s"]) if all_rec["s"] else None},
+    ]
+    return {
+        "week_start": start, "week_end": end,
+        "dictation": {"count": dic["n"] or 0,
+                      "accuracy": dic_acc},
+        "submissions": {"graded": graded, "accuracy": accuracy},
+        "recitation": {"count": rec["n"] or 0,
+                       "avg_score": round(rec["s"], 1) if rec["s"] else None},
+        "writing": {"count": wr["n"] or 0,
+                    "avg_score": round(wr["s"], 1) if wr["s"] else None},
+        "homework": {"total": hw["n"] or 0, "done": hw["done"] or 0,
+                     "rate": round((hw["done"] or 0) / hw["n"] * 100) if hw["n"] else None},
+        "active_days": len(days),
+        "weak_points": [dict(w) for w in weak],
+        "radar": radar,
+    }
+
+
+# ---------- 教师端：作业 / 听写 / 作文 ----------
+
+class AssignmentCreateReq(BaseModel):
+    class_id: str
+    title: str
+    type: str = "exercise"
+    ref: dict = {}
+    instructions: str = ""
+    due_at: str = ""
+
+
+@app.get("/teacher/assignments")
+def teacher_assignments(request: Request, class_id: str = ""):
+    teacher_guard(request)
+    conn = get_conn()
+    sql = """SELECT a.*,
+               (SELECT COUNT(*) FROM students s WHERE s.class_id=a.class_id) n_students,
+               (SELECT COUNT(*) FROM assignment_submissions x
+                 WHERE x.assignment_id=a.id AND x.status IN ('submitted','late','graded')) n_done
+             FROM assignments a"""
+    args = []
+    if class_id:
+        sql += " WHERE a.class_id=?"
+        args.append(class_id)
+    sql += " ORDER BY a.id DESC"
+    rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+    for r in rows:
+        r["ref"] = _parse_json(r.pop("ref_json", None), {})
+    return {"assignments": rows}
+
+
+@app.post("/teacher/assignments")
+def teacher_assignment_create(req: AssignmentCreateReq, request: Request):
+    teacher_guard(request)
+    if req.class_id not in CLASS_CONTENT:
+        raise HTTPException(400, "unknown class")
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT INTO assignments(class_id,title,type,ref_json,instructions,due_at)
+           VALUES(?,?,?,?,?,?)""",
+        (req.class_id, req.title, req.type,
+         json.dumps(req.ref, ensure_ascii=False), req.instructions,
+         req.due_at or None))
+    conn.commit()
+    log_teacher_action("assignment_create", target_class=req.class_id,
+                       detail={"title": req.title, "type": req.type})
+    return {"id": cur.lastrowid}
+
+
+@app.get("/teacher/assignment/{aid}/submissions")
+def teacher_assignment_submissions(aid: int, request: Request):
+    teacher_guard(request)
+    conn = get_conn()
+    a = conn.execute("SELECT * FROM assignments WHERE id=?", (aid,)).fetchone()
+    if not a:
+        raise HTTPException(404, "assignment not found")
+    rows = conn.execute(
+        """SELECT s.id, s.display_name, s.student_no, x.status, x.submitted_at, x.score
+           FROM students s
+           LEFT JOIN assignment_submissions x
+             ON x.student_id=s.id AND x.assignment_id=?
+           WHERE s.class_id=? ORDER BY s.student_no""",
+        (aid, a["class_id"])).fetchall()
+    return {"assignment": {**dict(a), "ref": _parse_json(a["ref_json"], {})},
+            "students": [dict(r) for r in rows]}
+
+
+@app.get("/teacher/dictation")
+def teacher_dictation(request: Request, class_id: str = "C6/1"):
+    teacher_guard(request)
+    conn = get_conn()
+    tz = class_tz(class_id)
+    d = f"date(de.created_at,'{tz}')"
+    summary = conn.execute(
+        f"""SELECT COUNT(*) n, SUM(is_correct) c FROM dictation_events de
+            JOIN students s ON s.id=de.student_id
+            WHERE s.class_id=? AND {d} >= date('now','{tz}','-7 days')""",
+        (class_id,)).fetchone()
+    top = conn.execute(
+        f"""SELECT de.target, COUNT(*) wrong, MAX(de.created_at) last
+            FROM dictation_events de JOIN students s ON s.id=de.student_id
+            WHERE s.class_id=? AND de.is_correct=0
+            GROUP BY de.target ORDER BY wrong DESC LIMIT 20""",
+        (class_id,)).fetchall()
+    per_student = conn.execute(
+        f"""SELECT s.id, s.display_name, COUNT(de.id) n, SUM(de.is_correct) c
+            FROM students s LEFT JOIN dictation_events de
+              ON de.student_id=s.id AND {d} >= date('now','{tz}','-7 days')
+            WHERE s.class_id=? GROUP BY s.id ORDER BY s.display_name""",
+        (class_id,)).fetchall()
+    return {
+        "week": {"total": summary["n"] or 0,
+                 "accuracy": round((summary["c"] or 0) / summary["n"] * 100) if summary["n"] else None},
+        "top_wrong": [dict(r) for r in top],
+        "students": [dict(r) for r in per_student],
+    }
+
+
+@app.get("/teacher/writings")
+def teacher_writings(request: Request, class_id: str = "C6/1", status: str = ""):
+    teacher_guard(request)
+    conn = get_conn()
+    sql = """SELECT w.*, s.display_name, s.student_no
+             FROM writing_submissions w
+             JOIN students s ON s.id=w.student_id
+             WHERE s.class_id=?"""
+    args = [class_id]
+    if status:
+        sql += " AND w.status=?"
+        args.append(status)
+    sql += " ORDER BY w.submitted_at DESC, w.id DESC LIMIT 200"
+    rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+    # writing_tasks 在内容库，跨库在 Python 侧合并
+    tasks = {r["id"]: dict(r) for r in content_db().execute(
+        "SELECT id, title, unit FROM writing_tasks").fetchall()}
+    for r in rows:
+        t = tasks.get(r.get("task_id"), {})
+        r["task_title"] = t.get("title")
+        r["unit"] = t.get("unit")
+        r["ai_scores"] = _parse_json(r.pop("ai_scores_json", None), None)
+        r["ai_feedback"] = _parse_json(r.pop("ai_feedback_json", None), None)
+        r["teacher_scores"] = _parse_json(r.pop("teacher_scores_json", None), None)
+    return {"writings": rows}
+
+
+class WritingReviewReq(BaseModel):
+    submission_id: int
+    scores: dict = {}
+    comment: str = ""
+
+
+@app.post("/teacher/writing/review")
+def teacher_writing_review(req: WritingReviewReq, request: Request):
+    teacher_guard(request)
+    conn = get_conn()
+    conn.execute(
+        """UPDATE writing_submissions SET teacher_scores_json=?, teacher_comment=?,
+           status='teacher_reviewed', reviewed_at=datetime('now') WHERE id=?""",
+        (json.dumps(req.scores, ensure_ascii=False), req.comment, req.submission_id))
+    conn.commit()
+    log_teacher_action("writing_review", detail={"submission_id": req.submission_id})
+    return {"ok": True}
+
+
+@app.get("/teacher/native_overview")
+def teacher_native_overview(request: Request, class_id: str = "C6/1"):
+    teacher_guard(request)
+    conn = get_conn()
+    tz = class_tz(class_id)
+    students = conn.execute(
+        """SELECT id, display_name, student_no FROM students
+           WHERE class_id=? ORDER BY student_no""", (class_id,)).fetchall()
+    out = []
+    for s in students:
+        sid = s["id"]
+        dic = conn.execute(
+            f"""SELECT COUNT(*) n, SUM(is_correct) c FROM dictation_events
+                WHERE student_id=? AND date(created_at,'{tz}') >= date('now','{tz}','-7 days')""",
+            (sid,)).fetchone()
+        hw = conn.execute(
+            f"""SELECT COUNT(*) n,
+                       SUM(CASE WHEN x.status IN ('submitted','late','graded') THEN 1 ELSE 0 END) done
+                FROM assignments a LEFT JOIN assignment_submissions x
+                  ON x.assignment_id=a.id AND x.student_id=?
+                WHERE a.class_id=?""", (sid, class_id)).fetchone()
+        wr = conn.execute(
+            """SELECT COUNT(*) n, AVG(json_extract(ai_scores_json,'$.总分')) s
+               FROM writing_submissions WHERE student_id=? AND status!='draft'""",
+            (sid,)).fetchone()
+        last = conn.execute(
+            "SELECT MAX(created_at) m FROM logs WHERE student_id=?", (sid,)).fetchone()["m"]
+        out.append({
+            "id": sid, "display_name": s["display_name"], "student_no": s["student_no"],
+            "dictation_accuracy": round((dic["c"] or 0) / dic["n"] * 100) if dic["n"] else None,
+            "homework_rate": round((hw["done"] or 0) / hw["n"] * 100) if hw["n"] else None,
+            "writing_count": wr["n"] or 0,
+            "writing_avg": round(wr["s"], 1) if wr["s"] else None,
+            "last_active": last,
+        })
+    return {"class_id": class_id, "students": out,
+            "assignments": conn.execute(
+                "SELECT COUNT(*) c FROM assignments WHERE class_id=?", (class_id,)).fetchone()["c"]}
 
 
 # ---------- 静态页面（必须放最后） ----------
