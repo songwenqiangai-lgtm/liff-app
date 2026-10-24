@@ -33,3 +33,4 @@ venv/
 
 # 中文班内容构建中间产物（成品在 content.db）
 content/g6a/
+.fuse_hidden*
