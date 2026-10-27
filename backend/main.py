@@ -382,10 +382,47 @@ def maybe_create_t1(student, item_id, verdict):
                      ai_action="AI 提示阶梯已用尽，仍判 incorrect", auto=1)
 
 
+def _teacher_password():
+    """教师密码：app_settings 里改过就用改过的，否则用环境变量。"""
+    try:
+        row = get_conn().execute(
+            "SELECT value FROM app_settings WHERE key='teacher_password'").fetchone()
+        if row and row["value"]:
+            return row["value"]
+    except Exception:
+        pass
+    return TEACHER_PASSWORD
+
+
 def teacher_guard(request: Request):
     token = request.headers.get("X-Teacher-Token", "")
-    if not TEACHER_PASSWORD or token != TEACHER_PASSWORD:
+    pwd = _teacher_password()
+    if not pwd or not hmac.compare_digest(token.encode(), pwd.encode()):
         raise HTTPException(401, "bad teacher token")
+
+
+class TeacherPasswordReq(BaseModel):
+    new_password: str
+
+
+@app.post("/teacher/password")
+def teacher_change_password(req: TeacherPasswordReq, request: Request):
+    """改密码后写入 app_settings，立即生效；忘密码时删掉该行即回退到环境变量。"""
+    teacher_guard(request)
+    new = (req.new_password or "").strip()
+    if len(new) < 8:
+        raise HTTPException(400, "新密码至少 8 位")
+    if hmac.compare_digest(new.encode(), _teacher_password().encode()):
+        raise HTTPException(400, "新密码不能与当前密码相同")
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO app_settings(key,value,updated_at)
+           VALUES('teacher_password',?,datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+             updated_at=excluded.updated_at""",
+        (new,))
+    conn.commit()
+    return {"ok": True}
 
 
 # ---------- 教师端日志筛选 ----------
@@ -822,6 +859,9 @@ async def api_feedback(req: FeedbackReq, request: Request):
         "INSERT INTO feedback_events(student_id, feedback_time, adopted) VALUES(?, datetime('now'), ?)",
         (student["id"], "partial" if result.get("verdict") in ("partial", "incorrect") else "full"))
     conn.commit()
+    # 中文班：做完本题即视为该课练习作业已交（教师端按课次布置）
+    if native:
+        _auto_complete_homework(student, "exercise", item["lesson_no"])
     # 中文班同时维护错题本（练习/测验主观题）
     if native and result.get("verdict") in ("partial", "incorrect"):
         upsert_error(student["id"], "exercise", req.item_id,
@@ -991,14 +1031,21 @@ def api_lesson(request: Request, lesson: str):
             "SELECT id, title, body_zh FROM texts WHERE book=? AND lesson_no=?",
             (book, lesson)).fetchone()
         text = dict(text_row) if text_row else None
+        # 词句段属于「语文园地」，按单元取：本单元任一课都能打开练习
         grammar = [dict(r) for r in conn.execute(
             """SELECT point, explanation_zh, example_zh FROM grammar_points
-               WHERE book=? AND lesson_no=? ORDER BY id""",
-            (book, lesson)).fetchall()]
+               WHERE book=? AND lesson_no IN (
+                     SELECT lesson_no FROM lessons WHERE book=? AND unit=(
+                       SELECT unit FROM lessons WHERE book=? AND lesson_no=?))
+               ORDER BY id""",
+            (book, book, book, lesson)).fetchall()]
         exercises = [dict(r) for r in conn.execute(
-            """SELECT id, module, prompt_zh, answer, explanation_th, q_type,
-                      score, passage_id, tags
-               FROM items WHERE book=? AND lesson_no=? ORDER BY module, id""",
+            """SELECT i.id, i.module, i.prompt_zh, i.answer, i.q_type, i.score,
+                      i.passage_id, i.tags,
+                      COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
+                      p.title AS passage_title, p.body AS passage_body
+               FROM items i LEFT JOIN passages p ON p.id = i.passage_id
+               WHERE i.book=? AND i.lesson_no=? ORDER BY i.module, i.id""",
             (book, lesson)).fetchall()]
         exam = [dict(r) for r in conn.execute(
             """SELECT id, question_zh, option_a, option_b, option_c, option_d,
@@ -1095,6 +1142,8 @@ def api_exam_submit(req: ExamSubmitReq, request: Request):
                          r["q_type"] if "q_type" in r.keys() else None, None)
     total = len(rows)
     score = round(correct_count / total * 100) if total else 0
+    if native:
+        _auto_complete_homework(student, "exam", req.lesson_no, score)
     log_event(student, "exam_submit", input_text=None,
               response_json={"lesson_no": req.lesson_no, "score": score,
                              "total": total, "correct": correct_count})
@@ -2003,6 +2052,7 @@ def api_dictation_submit(req: DictationSubmitReq, request: Request):
                          "字词", r.get("target", ""))
     conn.commit()
     score = round(correct / total * 100) if total else 0
+    _auto_complete_homework(student, "dictation", req.lesson_no, score)
     log_event(student, "dictation_submit", module="dictation",
               response_json={"lesson_no": req.lesson_no, "mode": req.mode,
                              "total": total, "correct": correct, "score": score})
@@ -2078,6 +2128,8 @@ def api_recitation_submit(req: RecitationReq, request: Request):
     conn.commit()
     if score < 80:
         upsert_error(student["id"], "recitation", req.poem_id, "古诗文默写", poem["title"])
+    else:
+        _auto_complete_homework(student, "recitation", poem["lesson_no"], score)
     log_event(student, "recitation_submit", module="recitation",
               response_json={"poem_id": req.poem_id, "mode": req.mode, "score": score})
     return {"score": score, "detail": detail}
@@ -2305,6 +2357,30 @@ def _mark_homework_submitted(student, assignment_id: int, score=None):
              updated_at=datetime('now')""",
         (assignment_id, student["id"], status, score))
     conn.commit()
+
+
+def _auto_complete_homework(student, due_type: str, lesson_no, score=None):
+    """练习/测验/听写/背诵提交后，把同班同课次的对应作业自动标为已交。
+
+    作业由教师端按 ref_json={"lesson_no": "..."} 创建，type 取
+    dictation/exercise/exam/recitation 之一，与四类作答一一对应。
+    """
+    if not lesson_no:
+        return 0
+    rows = get_conn().execute(
+        "SELECT id, ref_json FROM assignments WHERE class_id=? AND type=?",
+        (student["class_id"], due_type)).fetchall()
+    n = 0
+    for r in rows:
+        try:
+            ref = json.loads(r["ref_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if str(ref.get("lesson_no", "")) != str(lesson_no):
+            continue
+        _mark_homework_submitted(student, r["id"], score)
+        n += 1
+    return n
 
 
 @app.post("/api/homework/{aid}/submit")

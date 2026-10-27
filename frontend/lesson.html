@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>บทเรียน · 课程</title>
-  <link rel="stylesheet" href="/assets/style.css?v=8">
+  <link rel="stylesheet" href="/assets/style.css?v=11">
   <style>
     /* 课文每句布局 */
     .sent-line { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0;
@@ -34,7 +34,7 @@
     <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     <div>กำลังโหลด... 正在加载</div>
   </div>
-  <script src="/assets/app.js?v=9"></script>
+  <script src="/assets/app.js?v=11"></script>
   <script>
     const LESSON = new URLSearchParams(location.search).get("lesson") || "1";
     const MODULE = new URLSearchParams(location.search).get("module") || "";
@@ -863,6 +863,22 @@
       if (!items.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无练习</div>'; return; }
       if (exIdxZh >= items.length) exIdxZh = 0;
       const it = items[exIdxZh];
+      const passage = it.passage_body
+        ? `<details class="passage-box" ${it.passage_body.length < 260 ? "open" : ""}>
+             <summary>📄 阅读短文：${App.escapeHtml(it.passage_title || "")}</summary>
+             <div class="passage-body t-cn">${App.escapeHtml(it.passage_body)}</div>
+           </details>`
+        : "";
+      const optCount = (it.prompt_zh.match(/(^|[\s\n])[A-D][．.、]/g) || []).length;
+      const isMcq = /^[A-D]$/i.test((it.answer || "").trim()) && optCount >= 3;
+      const answerBox = isMcq
+        ? `<div class="option-grid" id="opt-grid">
+             ${["A", "B", "C", "D"].map(L => `<button class="opt-btn" data-opt="${L}">${L}</button>`).join("")}
+           </div>
+           <input type="hidden" id="input" value="">`
+        : `<div class="exercise-input">
+             <textarea id="input" placeholder="在这里写下你的答案..." rows="4"></textarea>
+           </div>`;
       el.innerHTML = `
         <div class="card fade-in">
           <div class="exercise-header">
@@ -870,13 +886,21 @@
             <div class="progress"><div class="bar"><span style="width:${((exIdxZh + 1) / items.length) * 100}%"></span></div></div>
             <span class="badge" style="background:var(--c-primary-l);color:var(--c-primary-d);padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:600">${App.escapeHtml(it.q_type || it.module || "练习")}</span>
           </div>
+          ${passage}
           <div class="exercise-q t-cn" style="white-space:pre-wrap">${App.escapeHtml(it.prompt_zh)}</div>
-          <div class="exercise-input">
-            <textarea id="input" placeholder="在这里写下你的答案..." rows="4"></textarea>
-          </div>
+          ${answerBox}
           <button class="btn btn-primary btn-block btn-lg" id="btn-submit" style="margin-top:10px">提交</button>
           <div id="feedback"></div>
         </div>`;
+      if (isMcq) {
+        document.querySelectorAll(".opt-btn").forEach(b => {
+          b.onclick = () => {
+            document.querySelectorAll(".opt-btn").forEach(x => x.classList.remove("sel"));
+            b.classList.add("sel");
+            document.getElementById("input").value = b.dataset.opt;
+          };
+        });
+      }
       document.getElementById("btn-submit").onclick = () => submitExerciseZh(it, el);
     }
 
@@ -909,7 +933,7 @@
             ${r.answer_zh ? '<button class="hint-pill" data-h="4">✅ 参考答案</button>' : ""}
           </div>
           <div id="reveals"></div>
-          ${it.explanation_th ? `<div class="explain-box" style="margin-top:10px"><b>为什么这么答</b><br>${App.escapeHtml(it.explanation_th)}</div>` : ""}
+          ${it.explanation ? `<div class="explain-box" style="margin-top:10px"><b>为什么这么答</b><br>${App.escapeHtml(it.explanation)}</div>` : ""}
           <div class="decision-row" id="decision-box">
             <div class="d-q">AI 说得对吗？</div>
             <div class="decision-opts">

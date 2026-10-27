@@ -101,6 +101,7 @@
         <button class="nav-item" data-view="writings">📄 作文批改</button>
         <button class="nav-item" data-view="assessments">📝 成绩录入</button>
         <button class="nav-item" data-view="export">⬇ 数据导出</button>
+        <button class="nav-item" data-view="account">🔑 改密码</button>
         <button class="nav-item" id="btn-logout">🚪 退出</button>
       </nav>
       <main id="view"></main>
@@ -165,8 +166,32 @@
       assessments: viewAssessments, export: viewExport,
       weekly: viewWeekly, notifications: viewNotifications,
       native: viewNative, assignments: viewAssignments,
-      dictation: viewDictation, writings: viewWritings };
+      dictation: viewDictation, writings: viewWritings, account: viewAccount };
     function go(v) { VIEWS[v] ? VIEWS[v]() : viewOverview(); }
+
+    /* ---------- 改密码 ---------- */
+    function viewAccount() {
+      const el = document.getElementById("view");
+      el.innerHTML = `
+        <h1>🔑 修改教师密码</h1>
+        <div class="card" style="max-width:420px">
+          <p class="muted">密码至少 8 位。改完后这台设备会自动改用新密码，其他设备需要重新登录。</p>
+          <div style="margin-bottom:10px"><label class="muted" style="display:block">新密码</label>
+            <input id="pw1" type="password" autocomplete="new-password" style="width:100%;padding:9px"></div>
+          <div style="margin-bottom:14px"><label class="muted" style="display:block">再输一次</label>
+            <input id="pw2" type="password" autocomplete="new-password" style="width:100%;padding:9px"></div>
+          <button class="btn-primary" id="btn-pw" style="width:100%;padding:11px">保存</button>
+        </div>`;
+      document.getElementById("btn-pw").onclick = async () => {
+        const p1 = document.getElementById("pw1").value.trim();
+        const p2 = document.getElementById("pw2").value.trim();
+        if (p1.length < 8) return alert("密码至少 8 位");
+        if (p1 !== p2) return alert("两次输入不一致");
+        await api("/teacher/password", { method: "POST", body: JSON.stringify({ new_password: p1 }) });
+        localStorage.setItem(TOKEN_KEY, p1);
+        alert("密码已修改");
+      };
+    }
 
     /* ---------- 1 班级总览 ---------- */
     async function viewOverview() {

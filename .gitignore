@@ -13,6 +13,8 @@ backend/uploads/
 
 # 内容库 content.db 是静态内容（课文/生词/语法/考试），需部署到服务器 → 提交
 !content/content.db
+# 但导入前的自动备份不提交
+content/content.db.bak-*
 # 其余 content/ 下的都是开发产物（OCR文字稿/CSV导出/审校表/工具脚本），部署不需要
 content/ocr/
 content/*.csv

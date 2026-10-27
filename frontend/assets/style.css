@@ -202,6 +202,15 @@ label { display: block; font-size: .875rem; font-weight: 600; margin: var(--s-3)
 .grammar-example .ex-th { background: var(--c-primary-bg); }
 
 /* ===== 讲解 / 反馈盒 ===== */
+.passage-box { border: 1.5px solid var(--c-line-2); border-radius: var(--r-md);
+  background: #fbfaf5; margin-bottom: var(--s-4); overflow: hidden; }
+.passage-box summary { cursor: pointer; padding: 10px var(--s-3); font-size: .85rem;
+  font-weight: 600; color: var(--c-primary-d); background: #f4f1e6; list-style: none; }
+.passage-box summary::-webkit-details-marker { display: none; }
+.passage-box summary::before { content: "▸ "; }
+.passage-box[open] summary::before { content: "▾ "; }
+.passage-body { padding: var(--s-3) var(--s-4); font-size: .95rem; line-height: 1.9;
+  color: var(--c-text); white-space: pre-wrap; max-height: 46vh; overflow-y: auto; }
 .explain-box { background: linear-gradient(135deg, var(--c-primary-bg), #e6f2e9);
   border-radius: var(--r-md); padding: var(--s-4); margin-top: var(--s-4);
   font-size: .95rem; line-height: 1.7; border-left: 4px solid var(--c-primary); color: var(--c-text); }
@@ -238,6 +247,10 @@ label { display: block; font-size: .875rem; font-weight: 600; margin: var(--s-3)
 .exercise-q-th { font-size: .95rem; color: var(--c-muted); padding: 0 var(--s-1); margin-bottom: var(--s-4); }
 .exercise-input textarea { font-size: 1.1rem; min-height: 100px; line-height: 1.6; }
 .exercise-input-row { display: flex; gap: var(--s-2); margin: var(--s-3) 0 var(--s-3); }
+.option-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); margin: var(--s-3) 0; }
+.opt-btn { padding: 14px 0; font-size: 1.05rem; font-weight: 700; border-radius: var(--r-md);
+  border: 1.5px solid var(--c-line-2); background: #fff; color: var(--c-text); cursor: pointer; }
+.opt-btn.sel { border-color: var(--c-primary); background: var(--c-primary-l); color: var(--c-primary-d); }
 
 /* ===== 考试选项 ===== */
 .exam-card { padding: var(--s-5); margin-bottom: var(--s-4); border-radius: var(--r-md); }

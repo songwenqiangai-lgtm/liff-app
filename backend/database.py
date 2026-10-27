@@ -159,6 +159,11 @@ CREATE TABLE IF NOT EXISTS task_offline(
   score REAL, submitted_at TEXT DEFAULT (datetime('now')),
   task_source TEXT DEFAULT 'offline'
 );
+-- 运行期设置覆盖（教师密码等，优先于环境变量）
+CREATE TABLE IF NOT EXISTS app_settings(
+  key TEXT PRIMARY KEY, value TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 
 -- ============ 中文班（母语语文，C6/1） ============
 -- 作业：老师带课的核心对象
