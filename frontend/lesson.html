@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>บทเรียน · 课程</title>
-  <link rel="stylesheet" href="/assets/style.css?v=11">
+  <link rel="stylesheet" href="/assets/style.css?v=12">
   <style>
     /* 课文每句布局 */
     .sent-line { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0;
@@ -34,7 +34,7 @@
     <div style="display:flex;gap:6px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     <div>กำลังโหลด... 正在加载</div>
   </div>
-  <script src="/assets/app.js?v=11"></script>
+  <script src="/assets/app.js?v=12"></script>
   <script>
     const LESSON = new URLSearchParams(location.search).get("lesson") || "1";
     const MODULE = new URLSearchParams(location.search).get("module") || "";
@@ -869,16 +869,38 @@
              <div class="passage-body t-cn">${App.escapeHtml(it.passage_body)}</div>
            </details>`
         : "";
-      const optCount = (it.prompt_zh.match(/(^|[\s\n])[A-D][．.、]/g) || []).length;
-      const isMcq = /^[A-D]$/i.test((it.answer || "").trim()) && optCount >= 3;
-      const answerBox = isMcq
-        ? `<div class="option-grid" id="opt-grid">
-             ${["A", "B", "C", "D"].map(L => `<button class="opt-btn" data-opt="${L}">${L}</button>`).join("")}
-           </div>
-           <input type="hidden" id="input" value="">`
-        : `<div class="exercise-input">
-             <textarea id="input" placeholder="在这里写下你的答案..." rows="4"></textarea>
-           </div>`;
+      const opts = Array.isArray(it.options) ? it.options : [];
+      const promptOptCount = (it.prompt_zh.match(/(^|[\s\n])[A-D][．.、]/g) || []).length;
+      const legacyMcq = !opts.length && /^[A-D]$/i.test((it.answer || "").trim()) && promptOptCount >= 3;
+      const answerLen = (it.answer || "").replace(/[；;、,，\s]/g, "").length;
+      let answerBox;
+      if (opts.length >= 2) {
+        const LETTERS = "ABCD";
+        const longOpt = opts.some(o => String(o).length > 12);
+        const cols = longOpt ? 1 : Math.min(opts.length, 4);
+        answerBox = `
+          <div class="option-grid" id="opt-grid" style="grid-template-columns:repeat(${cols},1fr)">
+            ${opts.map((o, i) => `<button class="opt-btn" data-opt="${LETTERS[i]}">
+                <b>${LETTERS[i]}</b><span>${App.escapeHtml(String(o))}</span>
+              </button>`).join("")}
+          </div>
+          <input type="hidden" id="input" value="">`;
+      } else if (legacyMcq) {
+        answerBox = `
+          <div class="option-grid" id="opt-grid">
+            ${["A", "B", "C", "D"].map(L => `<button class="opt-btn" data-opt="${L}"><b>${L}</b></button>`).join("")}
+          </div>
+          <input type="hidden" id="input" value="">`;
+      } else if (answerLen <= 20) {
+        answerBox = `<div class="exercise-input">
+            <input type="text" id="input" autocomplete="off" placeholder="在这里写下答案">
+          </div>`;
+      } else {
+        answerBox = `<div class="exercise-input">
+            <textarea id="input" placeholder="在这里写下你的答案..." rows="4"></textarea>
+          </div>`;
+      }
+      const isMcq = opts.length >= 2 || legacyMcq;
       el.innerHTML = `
         <div class="card fade-in">
           <div class="exercise-header">
@@ -1042,6 +1064,7 @@
       const t = tasks[0];
       el.innerHTML = `
         <div class="card fade-in">
+          <div class="muted" style="font-size:.8rem;margin-bottom:6px">本单元习作</div>
           <h2 class="t-cn" style="font-size:1.15rem">✍️ ${App.escapeHtml(t.title)}</h2>
           <div class="muted" style="font-size:.85rem;margin-top:4px">要求不少于 ${t.min_words || 400} 字</div>
           <div class="t-cn" style="margin-top:12px;line-height:1.9;white-space:pre-wrap">${App.escapeHtml(t.prompt || "")}</div>

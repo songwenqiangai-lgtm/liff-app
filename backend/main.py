@@ -625,8 +625,9 @@ def api_login(req: LoginReq):
            WHERE student_id=? AND event_type='student_login'""",
         (student["id"],)).fetchone()["m"]
     if prev:
+        tz = class_tz(student["class_id"])
         gap = conn.execute(
-            f"SELECT CAST(julianday(date('now','{FC.TZ_OFFSET}')) - julianday(date(?,'{FC.TZ_OFFSET}')) AS INT)",
+            f"SELECT CAST(julianday(date('now','{tz}')) - julianday(date(?,'{tz}')) AS INT)",
             (prev,)).fetchone()[0]
         if gap is not None and gap >= FC.MOTIVATION_IDLE_DAYS:
             AN.notify("student", student["id"], "motivation", "我们想念你了！",
@@ -1041,12 +1042,18 @@ def api_lesson(request: Request, lesson: str):
             (book, book, book, lesson)).fetchall()]
         exercises = [dict(r) for r in conn.execute(
             """SELECT i.id, i.module, i.prompt_zh, i.answer, i.q_type, i.score,
-                      i.passage_id, i.tags,
+                      i.passage_id, i.tags, i.options_json, i.answer_type,
                       COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
                       p.title AS passage_title, p.body AS passage_body
                FROM items i LEFT JOIN passages p ON p.id = i.passage_id
                WHERE i.book=? AND i.lesson_no=? ORDER BY i.module, i.id""",
             (book, lesson)).fetchall()]
+        for e in exercises:
+            try:
+                e["options"] = json.loads(e.pop("options_json") or "[]")
+            except (TypeError, ValueError):
+                e["options"] = []
+            e.pop("answer_type", None)
         exam = [dict(r) for r in conn.execute(
             """SELECT id, question_zh, option_a, option_b, option_c, option_d,
                       score, q_type, passage_id
@@ -1063,7 +1070,12 @@ def api_lesson(request: Request, lesson: str):
             except Exception:
                 p["notes"] = []
         writing = []
-        if unit:
+        # 单元习作只在单元最后一课出现一次（否则同单元 4 课都显示同一个习作）
+        last_of_unit = conn.execute(
+            """SELECT lesson_no FROM lessons WHERE book=? AND unit=?
+               ORDER BY CAST(lesson_no AS INTEGER) DESC LIMIT 1""",
+            (book, unit)).fetchone()
+        if unit and last_of_unit and str(last_of_unit["lesson_no"]) == str(lesson):
             writing = [dict(r) for r in conn.execute(
                 "SELECT id, unit, title, prompt, requirements, min_words FROM writing_tasks "
                 "WHERE book=? AND unit=? ORDER BY id", (book, unit)).fetchall()]

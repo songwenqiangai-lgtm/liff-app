@@ -248,9 +248,19 @@ label { display: block; font-size: .875rem; font-weight: 600; margin: var(--s-3)
 .exercise-input textarea { font-size: 1.1rem; min-height: 100px; line-height: 1.6; }
 .exercise-input-row { display: flex; gap: var(--s-2); margin: var(--s-3) 0 var(--s-3); }
 .option-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); margin: var(--s-3) 0; }
-.opt-btn { padding: 14px 0; font-size: 1.05rem; font-weight: 700; border-radius: var(--r-md);
-  border: 1.5px solid var(--c-line-2); background: #fff; color: var(--c-text); cursor: pointer; }
+.opt-btn { padding: 14px 10px; font-size: 1rem; font-weight: 700; border-radius: var(--r-md);
+  border: 1.5px solid var(--c-line-2); background: #fff; color: var(--c-text); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 52px; line-height: 1.35; }
+.opt-btn b { flex: 0 0 auto; font-size: .95rem; opacity: .7; }
+.opt-btn span { flex: 1 1 auto; text-align: center; font-weight: 600;
+  word-break: break-word; overflow-wrap: anywhere; }
 .opt-btn.sel { border-color: var(--c-primary); background: var(--c-primary-l); color: var(--c-primary-d); }
+.opt-btn.sel b { opacity: 1; }
+
+.exercise-input input[type="text"] { width: 100%; padding: 14px; font-size: 1.05rem;
+  border-radius: var(--r-md); border: 1.5px solid var(--c-line-2);
+  font-family: "Noto Sans SC", sans-serif; }
 
 /* ===== 考试选项 ===== */
 .exam-card { padding: var(--s-5); margin-bottom: var(--s-4); border-radius: var(--r-md); }
