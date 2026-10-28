@@ -479,21 +479,21 @@
        ============================================================ */
     const NATIVE_LABELS = {
       hanzi: ["📖", "字词"], text: ["📄", "课文"], poem: ["🏮", "古诗文"],
-      grammar: ["✏️", "词句段"], exercise: ["🏋️", "练习"], exam: ["📝", "随堂测"],
-      writing: ["✍️", "习作"], pronounce: ["🎤", "朗读"],
+      grammar: ["✏️", "词句段"], practice: ["🏋️", "练习与随堂测"],
+      unit_quiz: ["🧪", "单元测验"], pronounce: ["🎤", "朗读"],
     };
 
     function renderNativeGrid() {
       const app = document.getElementById("app");
       const title = DATA.title || ("第 " + LESSON + " 课");
+      const nEx = (DATA.exercises || []).length, nExam = (DATA.exam || []).length;
       const mods = [
         { key: "hanzi", desc: "生字 · 词语 · 听写", on: (DATA.hanzi || []).length + (DATA.vocab || []).length > 0 },
         { key: "text", desc: "原文 · 分段朗读", on: !!DATA.text },
         { key: "poem", desc: "注释 · 背诵默写", on: (DATA.poems || []).length > 0 },
-        { key: "grammar", desc: "语言运用训练", on: (DATA.grammar || []).length > 0 },
-        { key: "exercise", desc: "阅读题 · AI 批改", on: (DATA.exercises || []).length > 0 },
-        { key: "exam", desc: "随堂小测 · 自动判分", on: (DATA.exam || []).length > 0 },
-        { key: "writing", desc: "AI 反馈 · 老师批改", on: (DATA.writing || []).length > 0 },
+        { key: "grammar", desc: "本课语法 · 语言运用", on: (DATA.grammar || []).length > 0 },
+        { key: "practice", desc: `当课练习 ${nEx} 题 · 随堂测 ${nExam} 题`, on: nEx + nExam > 0 },
+        { key: "unit_quiz", desc: `${DATA.unit_quiz_count || 0} 题 · 单元综合`, on: (DATA.unit_quiz_count || 0) > 0 },
         { key: "pronounce", desc: "跟读评测", on: !!DATA.text },
       ];
       app.innerHTML = `
@@ -515,6 +515,14 @@
               </a>`;
             }).join("")}
           </div>
+          <a class="card" href="writing.html" style="display:flex;align-items:center;gap:10px;margin-top:14px;text-decoration:none">
+            <span style="font-size:1.4rem">✍️</span>
+            <span style="flex:1">
+              <b class="t-cn" style="display:block">习作</b>
+              <span class="muted" style="font-size:.8rem">每单元一次 · AI 反馈</span>
+            </span>
+            <span class="muted">→</span>
+          </a>
         </div>`;
     }
 
@@ -530,9 +538,98 @@
         <div class="app-wrap fade-in"><div id="tab-content"></div></div>`;
       const el = document.getElementById("tab-content");
       ({ hanzi: renderHanzi, text: renderTextZh, poem: renderPoem,
-         grammar: renderGrammarZh, exercise: renderExerciseZh, exam: renderExamZh,
-         writing: renderWriting, pronounce: renderPronounceZh })[key](el);
+         grammar: renderGrammarZh, practice: renderPractice,
+         unit_quiz: renderUnitQuizZh, pronounce: renderPronounceZh })[key](el);
       window.scrollTo({ top: 0 });
+    }
+
+    /* ---------- 练习与随堂测（合并为一个入口） ---------- */
+    function renderPractice(el) {
+      const nEx = (DATA.exercises || []).length, nExam = (DATA.exam || []).length;
+      el.innerHTML = `
+        <div class="card" style="display:flex;gap:8px;padding:8px;flex-wrap:wrap">
+          ${nEx ? `<button class="btn btn-secondary btn-sm" data-tab="ex">当课练习 (${nEx})</button>` : ""}
+          ${nExam ? `<button class="btn btn-ghost btn-sm" data-tab="exam">随堂测 (${nExam})</button>` : ""}
+        </div>
+        <div id="pr-body"></div>`;
+      const body = document.getElementById("pr-body");
+      const tabs = el.querySelectorAll("[data-tab]");
+      const setTab = (t) => {
+        tabs.forEach(b => b.className = "btn btn-sm " + (b.dataset.tab === t ? "btn-secondary" : "btn-ghost"));
+        exIdxZh = 0;
+        if (t === "ex") renderExerciseZh(body); else renderExamZh(body);
+      };
+      tabs.forEach(b => b.onclick = () => setTab(b.dataset.tab));
+      setTab(nEx ? "ex" : "exam");
+    }
+
+    /* ---------- 单元测验（当课之外的题） ---------- */
+    function renderUnitQuizZh(el) {
+      el.innerHTML = '<div class="loading-pulse" style="text-align:center;padding:40px 0">载入单元测验...</div>';
+      App.call("/api/unit_quiz?lesson=" + LESSON).then(data => {
+        const qs = data.items || [];
+        if (!qs.length) {
+          el.innerHTML = '<div class="card muted" style="text-align:center">本单元暂无补充测验</div>';
+          return;
+        }
+        el.innerHTML = `
+          <div class="card" style="background:var(--c-primary-l);border:none">
+            <b class="t-cn">第 ${data.unit} 单元 · 单元测验</b>
+            <p class="muted" style="font-size:.82rem;margin-top:4px">这些题涉及本单元其他课文的内容，做完一起看答案和解析。</p>
+          </div>
+          <div class="exercise-header" style="margin-top:12px">
+            <span class="muted t-mono">${qs.length} 题</span>
+            <div class="progress"><div class="bar"><span id="uq-bar" style="width:0%"></span></div></div>
+            <span class="muted t-mono" id="uq-done">0 / ${qs.length}</span>
+          </div>` + qs.map((q, i) => `
+            <div class="card exam-card fade-in" data-qi="${q.id}">
+              <div class="exam-q-meta">
+                <span class="num">${i + 1}</span>
+                <span class="muted" style="font-size:.75rem;margin-left:8px">第 ${q.lesson_no} 课 ${App.escapeHtml(q.lesson_title || "")}</span>
+                <span class="t-mono" style="margin-left:auto">${App.escapeHtml(q.q_type || q.module || "")}</span>
+              </div>
+              ${q.passage_body ? `<details class="passage-box"><summary>📄 ${App.escapeHtml(q.passage_title || "阅读短文")}</summary><div class="passage-body t-cn">${App.escapeHtml(q.passage_body)}</div></details>` : ""}
+              <div class="exam-q-text t-cn" style="white-space:pre-wrap">${App.escapeHtml(q.prompt_zh)}</div>
+              ${(q.options || []).length >= 2
+                ? `<div class="exam-options">${q.options.map((o, k) =>
+                    `<button class="exam-opt" data-q="${q.id}" data-opt="${"ABCD"[k]}">
+                       <span class="letter">${"ABCD"[k]}</span><span class="t-cn">${App.escapeHtml(String(o))}</span></button>`).join("")}</div>`
+                : `<div class="exercise-input"><input type="text" data-qi="${q.id}" placeholder="写下答案"></div>`}
+            </div>`).join("") +
+          '<button class="btn btn-primary btn-block btn-xl fade-in" id="btn-uq" style="margin-top:16px">交卷查看答案</button><div id="uq-result"></div>';
+
+        el.querySelectorAll(".exam-opt").forEach(b => b.onclick = () => {
+          el.querySelectorAll(`.exam-opt[data-q="${b.dataset.q}"]`).forEach(x => x.classList.remove("selected"));
+          b.classList.add("selected");
+          const done = el.querySelectorAll(".exam-opt.selected").length;
+          document.getElementById("uq-done").textContent = `${done} / ${qs.length}`;
+          document.getElementById("uq-bar").style.width = (done / qs.length * 100) + "%";
+        });
+
+        document.getElementById("btn-uq").onclick = () => {
+          const chosen = {};
+          el.querySelectorAll(".exam-opt.selected").forEach(b => chosen[b.dataset.q] = b.dataset.opt);
+          el.querySelectorAll('input[data-qi]').forEach(i => { if (i.value.trim()) chosen[i.dataset.qi] = i.value.trim(); });
+          document.getElementById("uq-result").innerHTML = qs.map((q, i) => {
+            const mine = chosen[q.id];
+            const right = (q.answer || "").trim();
+            const rightLetter = (right.match(/^\s*([A-D])/) || [])[1] || "";
+            const ok = mine && (mine === right || mine === rightLetter ||
+              (q.options || [])["ABCD".indexOf(rightLetter)] === mine);
+            return `<div class="card ${ok ? "" : "wrong"}" style="margin-top:10px">
+              <div class="exam-q-meta"><span class="num">${i + 1}</span>
+                <span style="color:${ok ? "var(--c-primary-d)" : "var(--c-danger)"};font-weight:600">
+                  ${ok ? "✅ 正确" : `❌ 参考答案：${App.escapeHtml(right)}`}</span></div>
+              <div class="exam-q-text t-cn" style="white-space:pre-wrap">${App.escapeHtml(q.prompt_zh)}</div>
+              ${q.explanation ? `<div class="explain-box">${App.escapeHtml(q.explanation)}</div>` : ""}
+            </div>`;
+          }).join("");
+          document.getElementById("btn-uq").style.display = "none";
+          window.scrollTo({ top: document.getElementById("uq-result").offsetTop - 80, behavior: "smooth" });
+        };
+      }).catch(() => {
+        el.innerHTML = '<div class="card muted" style="text-align:center">载入失败，请重试</div>';
+      });
     }
 
     /* ---------- 字词 + 听写 ---------- */
@@ -562,16 +659,26 @@
     function showChars(body) {
       const chars = DATA.hanzi || [];
       if (!chars.length) { body.innerHTML = '<div class="card muted" style="text-align:center">本课没有生字表</div>'; return; }
-      body.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:10px">
-        ${chars.map(c => `
+      body.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px">
+        ${chars.map(c => {
+          const poly = Array.isArray(c.polyphone) ? c.polyphone : [];
+          return `
           <div class="card" style="padding:12px;text-align:center">
             <div class="t-cn" style="font-size:2rem;font-weight:700;line-height:1.2">${App.escapeHtml(c.char)}</div>
             <div class="muted" style="font-size:.8rem">${App.escapeHtml(c.pinyin || "")}</div>
             <div class="muted" style="font-size:.72rem;margin-top:2px">${App.escapeHtml([c.radical, c.strokes ? c.strokes + "画" : "", c.structure].filter(Boolean).join(" · "))}</div>
-            ${c.words ? `<div style="font-size:.78rem;margin-top:6px">${App.escapeHtml(c.words)}</div>` : ""}
-            ${c.note_zh ? `<div style="font-size:.72rem;color:#b85c1a;margin-top:4px">💡 ${App.escapeHtml(c.note_zh)}</div>` : ""}
+            ${c.words ? `<div class="t-cn" style="font-size:.82rem;margin-top:6px;color:var(--c-text-2)">组词：${App.escapeHtml(c.words)}</div>` : ""}
+            ${poly.length ? `<div style="margin-top:8px;text-align:left;background:#fdf7ef;border-radius:8px;padding:8px">
+              <div style="font-size:.74rem;font-weight:700;color:#b85c1a">多音字</div>
+              ${poly.map(p => `<div style="font-size:.74rem;margin-top:4px;line-height:1.5">
+                <b>${App.escapeHtml(p.pinyin || "")}</b>：${App.escapeHtml(p.meaning || "")}
+                ${p.words ? `<div class="muted">组词：${App.escapeHtml(p.words)}</div>` : ""}
+              </div>`).join("")}
+            </div>` : ""}
+            ${c.note_zh ? `<div style="font-size:.72rem;color:#b85c1a;margin-top:6px;text-align:left">💡 ${App.escapeHtml(c.note_zh)}</div>` : ""}
             <button class="btn btn-ghost btn-sm" style="margin-top:6px" data-say="${App.escapeHtml(c.char)}">🔊 听</button>
-          </div>`).join("")}
+          </div>`;
+        }).join("")}
       </div>`;
       body.querySelectorAll("[data-say]").forEach(b => b.onclick = () => App.speak(b.dataset.say));
     }
@@ -580,16 +687,35 @@
       const words = DATA.vocab || [];
       if (!words.length) { body.innerHTML = '<div class="card muted" style="text-align:center">本课没有词语表</div>'; return; }
       body.innerHTML = `<div class="card" style="margin-top:10px">
-        ${words.map(w => `
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px dashed var(--c-line)">
-            <div style="flex:1">
-              <span class="t-cn" style="font-weight:700;font-size:1.05rem">${App.escapeHtml(w.word)}</span>
-              <span class="muted" style="font-size:.8rem;margin-left:6px">${App.escapeHtml(w.pinyin || "")}</span>
-              ${w.meaning_zh ? `<div style="font-size:.82rem;color:var(--c-text-2);margin-top:2px">${App.escapeHtml(w.meaning_zh)}</div>` : ""}
-              ${w.example_zh ? `<div style="font-size:.78rem;color:var(--c-muted);margin-top:2px">例：${App.escapeHtml(w.example_zh)}</div>` : ""}
+        ${words.map(w => {
+          const syn = Array.isArray(w.synonyms) ? w.synonyms : [];
+          const ant = Array.isArray(w.antonyms) ? w.antonyms : [];
+          return `
+          <div style="padding:12px 0;border-bottom:1px dashed var(--c-line)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="flex:1">
+                <span class="t-cn" style="font-weight:700;font-size:1.05rem">${App.escapeHtml(w.word)}</span>
+                <span class="muted" style="font-size:.8rem;margin-left:6px">${App.escapeHtml(w.pinyin || "")}</span>
+              </div>
+              <button class="btn btn-ghost btn-sm" data-say="${App.escapeHtml(w.word)}">🔊</button>
             </div>
-            <button class="btn btn-ghost btn-sm" data-say="${App.escapeHtml(w.word)}">🔊</button>
-          </div>`).join("")}
+            ${w.meaning_zh ? `<div style="font-size:.84rem;color:var(--c-text-2);margin-top:4px">${App.escapeHtml(w.meaning_zh)}</div>` : ""}
+            ${w.example_zh ? `<div style="font-size:.78rem;color:var(--c-muted);margin-top:3px">例：${App.escapeHtml(w.example_zh)}</div>` : ""}
+            ${syn.length ? `<div style="margin-top:8px;background:#f2f7f3;border-radius:8px;padding:8px">
+              <div style="font-size:.74rem;font-weight:700;color:#2f6b45">近义词</div>
+              ${syn.map(s => `<div style="font-size:.76rem;margin-top:4px;line-height:1.6">
+                <b style="color:#2f6b45">${App.escapeHtml(s.word || "")}</b>：${App.escapeHtml(s.explanation || "")}
+                ${s.difference ? `<div style="color:#8a6a3a">区别：${App.escapeHtml(s.difference)}</div>` : ""}
+              </div>`).join("")}
+            </div>` : ""}
+            ${ant.length ? `<div style="margin-top:6px;background:#fbf2f2;border-radius:8px;padding:8px">
+              <div style="font-size:.74rem;font-weight:700;color:#9c3f3f">反义词</div>
+              ${ant.map(s => `<div style="font-size:.76rem;margin-top:4px;line-height:1.6">
+                <b style="color:#9c3f3f">${App.escapeHtml(s.word || "")}</b>：${App.escapeHtml(s.explanation || "")}
+              </div>`).join("")}
+            </div>` : ""}
+          </div>`;
+        }).join("")}
       </div>`;
       body.querySelectorAll("[data-say]").forEach(b => b.onclick = () => App.speak(b.dataset.say));
     }
@@ -919,7 +1045,10 @@
           b.onclick = () => {
             document.querySelectorAll(".opt-btn").forEach(x => x.classList.remove("sel"));
             b.classList.add("sel");
-            document.getElementById("input").value = b.dataset.opt;
+            // 连选项内容一起提交，批改时既能认字母也能认意思
+            const txt = b.querySelector("span")?.textContent || "";
+            document.getElementById("input").value =
+              txt ? `${b.dataset.opt}. ${txt}` : b.dataset.opt;
           };
         });
       }
@@ -1054,87 +1183,6 @@
           btn.style.display = "none";
           window.scrollTo({ top: document.getElementById("exam-result").offsetTop - 80, behavior: "smooth" });
         } catch (e) { alert("交卷失败"); btn.disabled = false; btn.textContent = "交卷"; }
-      };
-    }
-
-    /* ---------- 习作 ---------- */
-    function renderWriting(el) {
-      const tasks = DATA.writing || [];
-      if (!tasks.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本单元暂无习作任务</div>'; return; }
-      const t = tasks[0];
-      el.innerHTML = `
-        <div class="card fade-in">
-          <div class="muted" style="font-size:.8rem;margin-bottom:6px">本单元习作</div>
-          <h2 class="t-cn" style="font-size:1.15rem">✍️ ${App.escapeHtml(t.title)}</h2>
-          <div class="muted" style="font-size:.85rem;margin-top:4px">要求不少于 ${t.min_words || 400} 字</div>
-          <div class="t-cn" style="margin-top:12px;line-height:1.9;white-space:pre-wrap">${App.escapeHtml(t.prompt || "")}</div>
-          ${t.requirements ? `<div class="explain-box" style="margin-top:10px"><b>写作要求</b><br>${App.escapeHtml(t.requirements)}</div>` : ""}
-        </div>
-        <div class="card fade-in" style="margin-top:12px">
-          <textarea id="w-content" rows="14" placeholder="在这里写作文..."
-            style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--c-line-2);line-height:1.9;font-size:1rem;font-family:'Noto Sans SC',sans-serif"></textarea>
-          <div style="display:flex;justify-content:space-between;margin-top:6px">
-            <span class="muted" style="font-size:.8rem" id="w-count">0 字</span>
-            <span class="muted" style="font-size:.8rem" id="w-save"></span>
-          </div>
-          <div style="display:flex;gap:10px;margin-top:10px">
-            <button class="btn btn-secondary" id="w-draft" style="flex:1">保存草稿</button>
-            <button class="btn btn-primary" id="w-submit" style="flex:2">提交让 AI 批改</button>
-          </div>
-          <div id="w-result"></div>
-        </div>`;
-      const ta = document.getElementById("w-content");
-      const cnt = () => {
-        const n = (ta.value || "").replace(/[\s，。！？、；：""''（）,.!?;:]/g, "").length;
-        document.getElementById("w-count").textContent = n + " 字";
-        return n;
-      };
-      ta.oninput = cnt;
-      document.getElementById("w-draft").onclick = async () => {
-        try {
-          await App.call("/api/writing/save", { method: "POST",
-            body: JSON.stringify({ task_id: t.id, content: ta.value, draft_no: 1 }) });
-          document.getElementById("w-save").textContent = "✅ 草稿已保存 " + new Date().toLocaleTimeString();
-        } catch (e) { document.getElementById("w-save").textContent = "保存失败"; }
-      };
-      document.getElementById("w-submit").onclick = async () => {
-        const n = cnt();
-        if (n < 50) { alert("作文还太短，再写一些吧"); return; }
-        if (n < (t.min_words || 400) * 0.8 && !confirm(`现在只有 ${n} 字，要求不少于 ${t.min_words || 400} 字，确定提交吗？`)) return;
-        const btn = document.getElementById("w-submit");
-        btn.disabled = true; btn.textContent = "AI 老师批改中，约需 20 秒...";
-        try {
-          const r = await App.call("/api/writing/submit", { method: "POST",
-            body: JSON.stringify({ task_id: t.id, content: ta.value, draft_no: 1 }) });
-          const fb = r.feedback;
-          if (!fb) {
-            document.getElementById("w-result").innerHTML =
-              '<div class="feedback-box partial" style="margin-top:12px">作文已提交，AI 批改暂时不可用，老师会尽快批阅。</div>';
-          } else {
-            const s = fb.scores || {};
-            const dims = ["内容", "结构", "语言", "规范"];
-            document.getElementById("w-result").innerHTML = `
-              <div class="card fade-in" style="margin-top:14px;background:var(--c-primary-l)">
-                <div style="font-size:2rem;font-weight:800;color:var(--c-primary-d);text-align:center">${s["总分"] || "-"} 分</div>
-                <div style="display:flex;justify-content:space-around;margin-top:10px;font-size:.85rem">
-                  ${dims.map(d => `<span>${d} ${s[d] != null ? s[d] : "-"}</span>`).join("")}
-                </div>
-              </div>
-              ${(fb.highlights || []).length ? `<div class="explain-box" style="margin-top:10px"><b>✨ 亮点</b><br>${fb.highlights.map(h => App.escapeHtml(h)).join("<br>")}</div>` : ""}
-              ${(fb.suggestions || []).length ? `<div class="card" style="margin-top:10px">
-                <b>修改建议</b>
-                ${fb.suggestions.map((x, i) => `<div style="margin-top:10px;padding:10px;border-left:3px solid var(--c-primary);background:#fafafa;border-radius:6px">
-                  ${x.quote ? `<div style="font-size:.85rem;color:var(--c-muted)">「${App.escapeHtml(x.quote)}」</div>` : ""}
-                  <div style="margin-top:4px">${i + 1}. ${App.escapeHtml(x.advice)}</div>
-                </div>`).join("")}
-              </div>` : ""}
-              ${fb.overall ? `<div class="explain-box" style="margin-top:10px"><b>总评</b><br>${App.escapeHtml(fb.overall)}</div>` : ""}
-              <p class="muted" style="font-size:.8rem;margin-top:10px;text-align:center">修改后可以再提交一稿，老师还会给最终评分。</p>`;
-            document.getElementById("w-save").textContent = "✅ 已提交（第 1 稿）";
-          }
-        } catch (e) {
-          document.getElementById("w-result").innerHTML = '<div class="feedback-box error-text" style="margin-top:12px">提交失败，请重试</div>';
-        } finally { btn.disabled = false; btn.textContent = "提交让 AI 批改"; }
       };
     }
 

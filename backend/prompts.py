@@ -113,14 +113,28 @@ def feedback_messages_zh(item: dict, student_input: str) -> list:
     q_type = (item.get("q_type") or "").strip() or "综合理解"
     keys = item.keys() if hasattr(item, "keys") else {}
     answer_key = item.get("answer_key_json") if "answer_key_json" in keys else None
+    opts = []
+    if "options_json" in keys and item.get("options_json"):
+        try:
+            opts = json.loads(item["options_json"])
+        except (TypeError, ValueError):
+            opts = []
     payload = {
         "lesson": item.get("lesson_no"),
         "question_type": q_type,
         "prompt": item.get("prompt_zh"),
-        "reference_answer": item.get("answer"),
-        "scoring_points": answer_key or "按参考答案的意思判分，意思对即可",
-        "student_input": student_input,
     }
+    if opts:
+        letters = "ABCD"
+        payload["options"] = {letters[i]: o for i, o in enumerate(opts[:4])}
+        payload["reference_answer"] = item.get("answer")
+        payload["scoring_points"] = (
+            "这是单选题。学生提交的是“字母. 选项内容”，只要字母与参考答案字母一致就算正确；"
+            "字母对但内容写错、或字母不对，都判 incorrect。")
+    else:
+        payload["reference_answer"] = item.get("answer")
+        payload["scoring_points"] = answer_key or "按参考答案的意思判分，意思对即可"
+    payload["student_input"] = student_input
     return [
         {"role": "system", "content": ZH_FEEDBACK_SYSTEM_PROMPT},
         {"role": "user", "content": "请批改下面这道语文题，并按要求输出 JSON。\n"

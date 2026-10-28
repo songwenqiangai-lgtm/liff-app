@@ -831,7 +831,13 @@ async def api_feedback(req: FeedbackReq, request: Request):
     # 答得不一样时才交给 AI 判断是否"部分正确"。
     mine = _norm_answer(req.input_text)
     std = _norm_answer(item["answer"])
-    if mine and std and mine == std:
+    is_choice = "answer_type" in item.keys() and item["answer_type"] == "choice"
+    exact = bool(mine and std and mine == std)
+    if is_choice:
+        # 选择题提交的是"B. xuàn"，只看字母
+        m = re.match(r"\s*([A-Da-d])(?![A-Za-z])", req.input_text or "")
+        exact = bool(m) and m.group(1).upper() == (item["answer"] or "").strip().upper()
+    if exact:
         result = {
             "verdict": "correct",
             "error_type": "none",
@@ -1021,32 +1027,38 @@ def api_lesson(request: Request, lesson: str):
         unit = lesson_row["unit"]
         hanzi = [dict(r) for r in conn.execute(
             """SELECT id, char, pinyin, radical, strokes, structure, words,
-                      require_write, difficulty_tags, note_zh
+                      require_write, difficulty_tags, note_zh, polyphone_json
                FROM hanzi WHERE book=? AND lesson_no=? ORDER BY id""",
             (book, lesson)).fetchall()]
         vocab = [dict(r) for r in conn.execute(
-            """SELECT id, word, pinyin, meaning_zh, example_zh, note_zh
+            """SELECT id, word, pinyin, meaning_zh, example_zh, note_zh,
+                      synonyms_json, antonyms_json
                FROM vocab WHERE book=? AND lesson_no=? ORDER BY id""",
             (book, lesson)).fetchall()]
+        for lst, key in ((hanzi, "polyphone"), (vocab, "synonyms"), (vocab, "antonyms")):
+            for d in lst:
+                raw = d.pop(key + "_json", None)
+                try:
+                    d[key] = json.loads(raw) if raw else []
+                except (TypeError, ValueError):
+                    d[key] = []
         text_row = conn.execute(
             "SELECT id, title, body_zh FROM texts WHERE book=? AND lesson_no=?",
             (book, lesson)).fetchone()
         text = dict(text_row) if text_row else None
-        # 词句段属于「语文园地」，按单元取：本单元任一课都能打开练习
+        # 词句段：只给本课的语法知识点（单元园地的通用方法不再混进来）
         grammar = [dict(r) for r in conn.execute(
             """SELECT point, explanation_zh, example_zh FROM grammar_points
-               WHERE book=? AND lesson_no IN (
-                     SELECT lesson_no FROM lessons WHERE book=? AND unit=(
-                       SELECT unit FROM lessons WHERE book=? AND lesson_no=?))
-               ORDER BY id""",
-            (book, book, book, lesson)).fetchall()]
+               WHERE book=? AND lesson_no=? ORDER BY id""",
+            (book, lesson)).fetchall()]
         exercises = [dict(r) for r in conn.execute(
             """SELECT i.id, i.module, i.prompt_zh, i.answer, i.q_type, i.score,
                       i.passage_id, i.tags, i.options_json, i.answer_type,
                       COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
                       p.title AS passage_title, p.body AS passage_body
                FROM items i LEFT JOIN passages p ON p.id = i.passage_id
-               WHERE i.book=? AND i.lesson_no=? ORDER BY i.module, i.id""",
+               WHERE i.book=? AND i.lesson_no=? AND COALESCE(i.scope,'lesson')='lesson'
+               ORDER BY i.module, i.id""",
             (book, lesson)).fetchall()]
         for e in exercises:
             try:
@@ -1054,6 +1066,11 @@ def api_lesson(request: Request, lesson: str):
             except (TypeError, ValueError):
                 e["options"] = []
             e.pop("answer_type", None)
+        # 拿不准是不是当课内容的题，归到本单元「单元测验」
+        unit_quiz_count = conn.execute(
+            """SELECT COUNT(*) FROM items
+               WHERE book=? AND unit IS ? AND COALESCE(scope,'lesson')='unit'""",
+            (book, unit)).fetchone()[0]
         exam = [dict(r) for r in conn.execute(
             """SELECT id, question_zh, option_a, option_b, option_c, option_d,
                       score, q_type, passage_id
@@ -1069,22 +1086,13 @@ def api_lesson(request: Request, lesson: str):
                 p["notes"] = json.loads(p.pop("notes_json") or "[]")
             except Exception:
                 p["notes"] = []
-        writing = []
-        # 单元习作只在单元最后一课出现一次（否则同单元 4 课都显示同一个习作）
-        last_of_unit = conn.execute(
-            """SELECT lesson_no FROM lessons WHERE book=? AND unit=?
-               ORDER BY CAST(lesson_no AS INTEGER) DESC LIMIT 1""",
-            (book, unit)).fetchone()
-        if unit and last_of_unit and str(last_of_unit["lesson_no"]) == str(lesson):
-            writing = [dict(r) for r in conn.execute(
-                "SELECT id, unit, title, prompt, requirements, min_words FROM writing_tasks "
-                "WHERE book=? AND unit=? ORDER BY id", (book, unit)).fetchall()]
         return {
             "lesson_no": lesson, "title": lesson_row["title"], "unit": unit,
             "book": book, "ui_mode": "native",
             "sections": phase_sections(phase, class_id),
             "hanzi": hanzi, "vocab": vocab, "text": text, "grammar": grammar,
-            "exercises": exercises, "exam": exam, "poems": poems, "writing": writing,
+            "exercises": exercises, "exam": exam, "poems": poems,
+            "unit_quiz_count": unit_quiz_count,
         }
 
     vocab = []
@@ -1114,6 +1122,40 @@ def api_lesson(request: Request, lesson: str):
         "vocab": vocab, "text": text, "grammar": grammar,
         "exercises": exercises, "exam": exam,
     }
+
+
+@app.get("/api/unit_quiz")
+def api_unit_quiz(request: Request, lesson: str):
+    """本单元「拿不准是不是当课内容」的题，按课分组，连答案和解析一起给（单元测验用）。"""
+    student = get_student(parse_token(request))
+    book = student_book(student)
+    conn = content_db()
+    row = conn.execute(
+        "SELECT unit FROM lessons WHERE book=? AND lesson_no=?", (book, lesson)).fetchone()
+    if not row:
+        raise HTTPException(404, "lesson not found")
+    unit = row["unit"]
+    rows = conn.execute(
+        """SELECT i.id, i.lesson_no, i.module, i.prompt_zh, i.answer, i.q_type,
+                  i.options_json, i.passage_id,
+                  COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
+                  l.title AS lesson_title,
+                  p.title AS passage_title, p.body AS passage_body
+           FROM items i
+           JOIN lessons l ON l.book=i.book AND l.lesson_no=i.lesson_no
+           LEFT JOIN passages p ON p.id=i.passage_id
+           WHERE i.book=? AND i.unit IS ? AND COALESCE(i.scope,'lesson')='unit'
+           ORDER BY CAST(i.lesson_no AS INTEGER), i.id""",
+        (book, unit)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["options"] = json.loads(d.pop("options_json") or "[]")
+        except (TypeError, ValueError):
+            d["options"] = []
+        out.append(d)
+    return {"unit": unit, "count": len(out), "items": out}
 
 
 class ExamSubmitReq(BaseModel):

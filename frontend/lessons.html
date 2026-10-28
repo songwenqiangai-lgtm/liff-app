@@ -91,11 +91,11 @@
             <div class="lr-num">第 ${l.lesson_no} 课${l.type === "skim" ? " · 略读" : ""}</div>
             <div class="lr-title">${App.escapeHtml(l.title)}</div>
           </a>`).join("");
-        const writings = (u.writings || []).map(w => `
-          <a class="lesson-row" href="writing.html?task_id=${w.id}" style="border-left:4px solid #c88a3e">
-            <div class="lr-num">单元习作</div>
-            <div class="lr-title">✍️ ${App.escapeHtml(w.title)}</div>
-          </a>`).join("");
+        const writings = (u.writings || []).length ? `
+          <a class="lesson-row" href="writing.html?unit=${u.unit}" style="border-left:4px solid #c88a3e">
+            <div class="lr-num">习作</div>
+            <div class="lr-title">✍️ ${App.escapeHtml((u.writings[0] || {}).title || "本单元习作")}</div>
+          </a>` : "";
         return `
           <div style="margin: var(--s-5) 0 var(--s-2); padding: 0 var(--s-4)">
             <h2 style="font-size:1.05rem;color:var(--c-text)">

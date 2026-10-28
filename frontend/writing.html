@@ -25,21 +25,48 @@
     if (!App.requireLogin()) { /* redirect */ }
     else {
       const TASK_ID = new URLSearchParams(location.search).get("task_id");
-      if (TASK_ID) loadTask(parseInt(TASK_ID)); else loadList();
+      const UNIT = new URLSearchParams(location.search).get("unit");
+      if (TASK_ID) loadTask(parseInt(TASK_ID));
+      else if (UNIT) loadUnit(UNIT);
+      else loadList();
     }
 
     async function loadList() {
       const app = document.getElementById("app");
-      let tasks = [];
-      try { tasks = (await App.call("/api/writing/tasks")).tasks || []; }
+      let units = [];
+      try { units = (await App.call("/api/lessons")).units || []; }
       catch (e) { app.innerHTML = '<div class="card">加载失败</div>'; return; }
-      if (!tasks.length) { app.innerHTML = '<div class="card" style="text-align:center">还没有习作任务</div>'; return; }
-      app.innerHTML = tasks.map(t => `
-        <a class="task-row" href="writing.html?task_id=${t.id}">
-          <div class="muted" style="font-size:.78rem">第${t.unit || "?"}单元 · 不少于 ${t.min_words || 400} 字</div>
-          <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(t.title)}</div>
-          <div class="muted" style="font-size:.82rem;margin-top:4px">${App.escapeHtml((t.prompt || "").slice(0, 40))}...</div>
-        </a>`).join("");
+      if (!units.length) { app.innerHTML = '<div class="card" style="text-align:center">还没有习作任务</div>'; return; }
+      app.innerHTML = `<p class="muted" style="padding:0 var(--s-4) 8px;font-size:.85rem">每单元一次习作，点进单元看本次题目和本单元的课文。</p>` +
+        units.map(u => {
+          const w = (u.writings || [])[0];
+          return `<a class="task-row" href="writing.html?unit=${u.unit}">
+            <div class="muted" style="font-size:.78rem">第${u.unit}单元 · ${(u.lessons || []).length} 课</div>
+            <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(w ? w.title : "本次暂无习作")}</div>
+            <div class="muted" style="font-size:.82rem;margin-top:4px">${(u.lessons || []).map(l => App.escapeHtml(l.title)).join(" · ")}</div>
+          </a>`;
+        }).join("");
+    }
+
+    async function loadUnit(u) {
+      const app = document.getElementById("app");
+      let unit = null;
+      try { unit = ((await App.call("/api/lessons")).units || []).find(x => String(x.unit) === String(u)); }
+      catch (e) { app.innerHTML = '<div class="card">加载失败</div>'; return; }
+      if (!unit) { app.innerHTML = '<div class="card">没有这个单元</div>'; return; }
+      app.innerHTML = `<a class="back" style="display:inline-block;padding:0 var(--s-4) 10px" href="writing.html">← 全部单元</a>` +
+        (unit.writings || []).map(w => `
+          <a class="task-row" href="writing.html?task_id=${w.id}">
+            <div class="muted" style="font-size:.78rem">第${unit.unit}单元 · 本次习作</div>
+            <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(w.title)}</div>
+            <div class="muted" style="font-size:.82rem;margin-top:4px">点进去开始写 →</div>
+          </a>`).join("") +
+        `<div style="padding:6px var(--s-4) 0"><b class="t-cn">本单元课文</b></div>` +
+        (unit.lessons || []).map(l => `
+          <a class="task-row" href="lesson.html?lesson=${l.lesson_no}" style="border-left-color:var(--c-primary)">
+            <div class="muted" style="font-size:.78rem">第 ${l.lesson_no} 课</div>
+            <div style="font-weight:600;font-size:1rem;margin-top:2px" class="t-cn">${App.escapeHtml(l.title)}</div>
+          </a>`).join("");
     }
 
     async function loadTask(tid) {
