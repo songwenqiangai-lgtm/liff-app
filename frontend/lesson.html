@@ -479,7 +479,7 @@
        ============================================================ */
     const NATIVE_LABELS = {
       hanzi: ["📖", "字词"], text: ["📄", "课文"], poem: ["🏮", "古诗文"],
-      grammar: ["✏️", "词句段"], practice: ["🏋️", "练习与随堂测"],
+      grammar: ["✏️", "词句段"], practice: ["🏋️", "练习题"],
       unit_quiz: ["🧪", "单元测验"], pronounce: ["🎤", "朗读"],
     };
 
@@ -492,8 +492,7 @@
         { key: "text", desc: "原文 · 分段朗读", on: !!DATA.text },
         { key: "poem", desc: "注释 · 背诵默写", on: (DATA.poems || []).length > 0 },
         { key: "grammar", desc: "本课语法 · 语言运用", on: (DATA.grammar || []).length > 0 },
-        { key: "practice", desc: `当课练习 ${nEx} 题 · 随堂测 ${nExam} 题`, on: nEx + nExam > 0 },
-        { key: "unit_quiz", desc: `${DATA.unit_quiz_count || 0} 题 · 单元综合`, on: (DATA.unit_quiz_count || 0) > 0 },
+        { key: "practice", desc: `共 ${nEx + nExam} 题 · 当课`, on: nEx + nExam > 0 },
         { key: "pronounce", desc: "跟读评测", on: !!DATA.text },
       ];
       app.innerHTML = `
@@ -543,24 +542,21 @@
       window.scrollTo({ top: 0 });
     }
 
-    /* ---------- 练习与随堂测（合并为一个入口） ---------- */
+    /* ---------- 练习题（当课练习 + 随堂测合并为一个连续列表） ---------- */
     function renderPractice(el) {
       const nEx = (DATA.exercises || []).length, nExam = (DATA.exam || []).length;
       el.innerHTML = `
-        <div class="card" style="display:flex;gap:8px;padding:8px;flex-wrap:wrap">
-          ${nEx ? `<button class="btn btn-secondary btn-sm" data-tab="ex">当课练习 (${nEx})</button>` : ""}
-          ${nExam ? `<button class="btn btn-ghost btn-sm" data-tab="exam">随堂测 (${nExam})</button>` : ""}
+        <div class="card" style="background:var(--c-primary-l);border:none">
+          <b class="t-cn">练习题</b>
+          <p class="muted" style="font-size:.82rem;margin-top:4px">共 ${nEx + nExam} 题，做完一题 AI 老师马上批改。</p>
         </div>
-        <div id="pr-body"></div>`;
-      const body = document.getElementById("pr-body");
-      const tabs = el.querySelectorAll("[data-tab]");
-      const setTab = (t) => {
-        tabs.forEach(b => b.className = "btn btn-sm " + (b.dataset.tab === t ? "btn-secondary" : "btn-ghost"));
-        exIdxZh = 0;
-        if (t === "ex") renderExerciseZh(body); else renderExamZh(body);
-      };
-      tabs.forEach(b => b.onclick = () => setTab(b.dataset.tab));
-      setTab(nEx ? "ex" : "exam");
+        <div id="pr-ex"></div>
+        <div id="pr-exam"></div>`;
+      const exEl = document.getElementById("pr-ex");
+      const examEl = document.getElementById("pr-exam");
+      examOffset = nEx;
+      if (nEx) renderExerciseZh(exEl); else exEl.remove();
+      if (nExam) renderExamZh(examEl); else examEl.remove();
     }
 
     /* ---------- 单元测验（当课之外的题） ---------- */
@@ -982,7 +978,7 @@
     }
 
     /* ---------- 练习（中文） ---------- */
-    let exIdxZh = 0, exBusyZh = false;
+    let exIdxZh = 0, exBusyZh = false, examOffset = 0;
 
     function renderExerciseZh(el) {
       const items = DATA.exercises || [];
@@ -1096,7 +1092,7 @@
           <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top:16px">${exIdxZh === DATA.exercises.length - 1 ? "🎉 完成" : "下一题 →"}</button>`;
         document.getElementById("btn-next").onclick = () => {
           exIdxZh = exIdxZh === DATA.exercises.length - 1 ? 0 : exIdxZh + 1;
-          renderNativeModule("exercise");
+          renderExerciseZh(el);
           window.scrollTo({ top: 0, behavior: "smooth" });
         };
         const HINTS = { 1: r.hint1_zh, 2: r.hint2_zh, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
@@ -1138,12 +1134,12 @@
       if (!qs.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无测验</div>'; return; }
       el.innerHTML = `
         <div class="exercise-header">
-          <span class="muted t-mono">${qs.length} 题</span>
+          <span class="muted t-mono">${examOffset ? (qs.length > 1 ? `第 ${examOffset + 1}–${examOffset + qs.length} 题` : `第 ${examOffset + 1} 题`) : `${qs.length} 题`}</span>
           <div class="progress"><div class="bar"><span id="exam-bar" style="width:0%"></span></div></div>
           <span class="muted t-mono" id="exam-done">0 / ${qs.length}</span>
         </div>` + qs.map((q, i) => `
           <div class="card exam-card fade-in" data-qi="${q.id}">
-            <div class="exam-q-meta"><span class="num">${i + 1}</span>
+            <div class="exam-q-meta"><span class="num">${examOffset + i + 1}</span>
               <span class="t-mono" style="margin-left:auto">${App.escapeHtml(q.q_type || "")}</span></div>
             <div class="exam-q-text t-cn">${App.escapeHtml(q.question_zh)}</div>
             <div class="exam-options">

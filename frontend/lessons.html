@@ -26,6 +26,17 @@
     .lesson-row .lr-badge { position: absolute; top: var(--s-4); right: var(--s-4);
       background: var(--c-primary); color: #fff; padding: 3px 10px;
       border-radius: 999px; font-size: .7rem; font-weight: 700; }
+    .unit-row { display: block; position: relative; padding: var(--s-5); margin: 0 0 var(--s-3);
+      background: #fff; border-radius: var(--r-lg); box-shadow: var(--sh-1);
+      text-decoration: none; color: inherit; }
+    .unit-row:active { transform: scale(.98); }
+    .unit-row .ur-num { font-size: .78rem; color: var(--c-muted); font-weight: 600;
+      letter-spacing: .05em; }
+    .unit-row .ur-name { font-size: 1.2rem; font-weight: 700; color: var(--c-text);
+      margin-top: 2px; font-family: "Noto Sans SC", sans-serif; }
+    .unit-row .ur-meta { font-size: .8rem; color: var(--c-muted); margin-top: var(--s-2); }
+    .unit-row .ur-arrow { position: absolute; right: var(--s-5); top: 50%;
+      transform: translateY(-50%); color: var(--c-muted); font-size: 1.2rem; }
     .empty-state { text-align: center; padding: var(--s-7) var(--s-5); color: var(--c-muted); }
     .empty-state svg { width: 80px; height: 80px; margin: 0 auto var(--s-3); display: block; }
   </style>
@@ -84,26 +95,27 @@
 
     function renderNative(app, data) {
       const units = data.units || [];
-      const blocks = units.map(u => {
-        const name = UNIT_NAMES[u.unit] || "";
-        const lessons = u.lessons.map(l => `
-          <a class="lesson-row" href="lesson.html?lesson=${l.lesson_no}">
-            <div class="lr-num">第 ${l.lesson_no} 课${l.type === "skim" ? " · 略读" : ""}</div>
-            <div class="lr-title">${App.escapeHtml(l.title)}</div>
-          </a>`).join("");
-        const writings = (u.writings || []).length ? `
-          <a class="lesson-row" href="writing.html?unit=${u.unit}" style="border-left:4px solid #c88a3e">
-            <div class="lr-num">习作</div>
-            <div class="lr-title">✍️ ${App.escapeHtml((u.writings[0] || {}).title || "本单元习作")}</div>
-          </a>` : "";
-        return `
-          <div style="margin: var(--s-5) 0 var(--s-2); padding: 0 var(--s-4)">
-            <h2 style="font-size:1.05rem;color:var(--c-text)">
-              第${CN_NUM[u.unit] || u.unit}单元${name ? " · " + name : ""}
-            </h2>
-          </div>
-          <div style="padding: 0 var(--s-4)">${lessons}${writings}</div>`;
-      }).join("");
+      const draw = () => {
+        const m = location.hash.match(/^#u(\d+)$/);
+        if (m) renderUnitDetail(app, units, parseInt(m[1], 10));
+        else renderUnitList(app, units);
+        window.scrollTo({ top: 0 });
+      };
+      if (!window.__unitHashHooked) {
+        window.addEventListener("hashchange", draw);
+        window.__unitHashHooked = true;
+      }
+      draw();
+    }
+
+    function renderUnitList(app, units) {
+      const cards = units.map(u => `
+        <a class="unit-row" href="#u${u.unit}">
+          <div class="ur-num">第${CN_NUM[u.unit] || u.unit}单元</div>
+          <div class="ur-name">${App.escapeHtml(UNIT_NAMES[u.unit] || "")}</div>
+          <div class="ur-meta">${u.lessons.length} 课${(u.writings || []).length ? " · 习作 1 篇" : ""}</div>
+          <div class="ur-arrow">→</div>
+        </a>`).join("");
       app.innerHTML = `
         <div class="top-bar">
           <a class="back" href="home.html">← 返回</a>
@@ -111,8 +123,47 @@
           <div style="width:40px"></div>
         </div>
         <div class="app-wrap fade-in">
-          ${blocks || '<div class="card muted" style="text-align:center">还没有课程内容</div>'}
+          <p class="muted" style="text-align:center;margin:var(--s-2) 0 var(--s-4)">选择单元 · เลือกหน่วย</p>
+          ${cards || '<div class="card muted" style="text-align:center">还没有课程内容</div>'}
         </div>`;
+    }
+
+    function renderUnitDetail(app, units, n) {
+      const u = units.find(x => x.unit === n);
+      if (!u) { location.hash = ""; return; }
+      const lessons = u.lessons.map(l => `
+        <a class="lesson-row" href="lesson.html?lesson=${l.lesson_no}">
+          <div class="lr-num">第 ${l.lesson_no} 课${l.type === "skim" ? " · 略读" : ""}</div>
+          <div class="lr-title">${App.escapeHtml(l.title)}</div>
+        </a>`).join("");
+      const writings = (u.writings || []).length ? `
+        <a class="lesson-row" href="writing.html?unit=${u.unit}" style="border-left:4px solid #c88a3e">
+          <div class="lr-num">习作</div>
+          <div class="lr-title">✍️ ${App.escapeHtml(u.writings[0].title || "本单元习作")}</div>
+        </a>` : "";
+      const first = (u.lessons[0] || {}).lesson_no || 1;
+      const quiz = `
+        <a class="lesson-row" href="lesson.html?lesson=${first}&module=unit_quiz" style="border-left:4px solid #8a6fd1">
+          <div class="lr-num">第${CN_NUM[n] || n}单元</div>
+          <div class="lr-title">🧪 单元测验</div>
+          <div class="lr-meta"><span id="uq-cnt">全单元综合题</span></div>
+        </a>`;
+      app.innerHTML = `
+        <div class="top-bar">
+          <a class="back" href="lessons.html">← 单元</a>
+          <h1 class="t-cn">第${CN_NUM[n] || n}单元</h1>
+          <div style="width:40px"></div>
+        </div>
+        <div class="app-wrap fade-in">
+          <p class="muted" style="text-align:center;margin:var(--s-2) 0 var(--s-4)">
+            ${App.escapeHtml(UNIT_NAMES[n] || "")}
+          </p>
+          ${lessons}${writings}${quiz}
+        </div>`;
+      App.call("/api/unit_quiz?lesson=" + first).then(d => {
+        const el = document.getElementById("uq-cnt");
+        if (el && d && d.count) el.textContent = `${d.count} 题 · 全单元综合`;
+      }).catch(() => {});
     }
   </script>
 </body>
