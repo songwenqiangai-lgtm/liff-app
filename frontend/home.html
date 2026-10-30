@@ -22,25 +22,28 @@
       font-size: .9rem; font-family: inherit; cursor: pointer; }
     .logout-btn:active { background: var(--c-primary-l); }
     .entry-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, 1fr);
-      grid-auto-rows: minmax(0, 1fr); gap: var(--s-2); padding: var(--s-2) var(--s-4); }
-    .entry-card { display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 5px; padding: var(--s-2); background: #fff; border-radius: var(--r-lg);
-      box-shadow: var(--sh-2); text-decoration: none; color: inherit; text-align: center;
-      aspect-ratio: 1 / 1; max-height: 100%; overflow: hidden;
-      transition: all var(--t-norm); position: relative; }
+      grid-auto-rows: minmax(74px, auto); align-content: center;
+      gap: var(--s-2); padding: var(--s-2) var(--s-4); }
+    .entry-card { display: flex; align-items: center; gap: 10px; min-height: 70px;
+      padding: 11px 12px; background: #fff; border-radius: var(--r-lg);
+      box-shadow: var(--sh-1); text-decoration: none; color: inherit;
+      text-align: left; overflow: hidden; position: relative;
+      transition: transform var(--t-fast), box-shadow var(--t-fast); }
     .entry-card:active { transform: scale(.97); }
-    .entry-card .ec-icon { width: 40px; height: 40px; border-radius: 13px;
+    .entry-card .ec-icon { width: 36px; height: 36px; border-radius: 12px;
       background: linear-gradient(135deg, var(--c-primary), var(--c-primary-d));
       color: #fff; display: flex; align-items: center; justify-content: center;
-      font-size: 1.15rem; flex-shrink: 0; box-shadow: 0 3px 10px rgba(31,138,95,.25); }
+      font-size: 1.05rem; flex-shrink: 0; box-shadow: 0 3px 10px rgba(31,138,95,.25); }
     .entry-card.ask .ec-icon { background: linear-gradient(135deg, #2e6cb0, #1f4e8a); box-shadow: 0 3px 10px rgba(46,108,176,.25); }
     .entry-card.report .ec-icon { background: linear-gradient(135deg, #7b5cc4, #5a3f9e); box-shadow: 0 3px 10px rgba(123,92,196,.25); }
-    .entry-card .ec-zh { font-weight: 700; font-size: .92rem; color: var(--c-text);
-      font-family: "Noto Sans SC", sans-serif; line-height: 1.3; }
-    .entry-card .ec-th { color: var(--c-muted); font-size: .66rem; line-height: 1.3;
+    .entry-card .ec-text { min-width: 0; }
+    .entry-card .ec-zh { font-weight: 700; font-size: .88rem; color: var(--c-text);
+      font-family: "Noto Sans SC", sans-serif; line-height: 1.3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .entry-card .ec-th { color: var(--c-muted); font-size: .62rem; line-height: 1.4;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .entry-card .ec-arrow { display: none; }
-    .entry-grid .entry-card:last-child:nth-child(odd) { grid-column: span 2; aspect-ratio: auto; }
+    .entry-grid .entry-card:last-child:nth-child(odd) { grid-column: span 2; justify-content: center; }
   </style>
 </head>
 <body>
@@ -98,7 +101,7 @@
         <div class="ec-icon" style="background:linear-gradient(135deg,#d9772e,#b85c1a);box-shadow:0 4px 12px rgba(217,119,46,.25)">📝</div>
         <div class="ec-text">
           <div class="ec-zh">今日作业</div>
-          <div class="ec-th" id="hw-sub">查看老师布置的作业</div>
+          <div class="ec-th" id="hw-sub">老师布置的作业</div>
         </div>
         <div class="ec-arrow">→</div>
         <span id="hw-badge" style="display:none;position:absolute;top:10px;right:44px;background:#d64545;color:#fff;border-radius:999px;font-size:.7rem;padding:2px 7px"></span>
@@ -108,7 +111,7 @@
         <div class="ec-icon">📚</div>
         <div class="ec-text">
           <div class="ec-zh">课程学习</div>
-          <div class="ec-th">统编版六年级上册 · 按单元学习</div>
+          <div class="ec-th">统编版六年级上册</div>
         </div>
         <div class="ec-arrow">→</div>
       </a>
@@ -117,7 +120,7 @@
         <div class="ec-icon" style="background:linear-gradient(135deg,#c88a3e,#a36b26);box-shadow:0 4px 12px rgba(200,138,62,.25)">✍️</div>
         <div class="ec-text">
           <div class="ec-zh">习作</div>
-          <div class="ec-th">每单元一次 · AI 批改</div>
+          <div class="ec-th">每单元 · AI 批改</div>
         </div>
         <div class="ec-arrow">→</div>
       </a>
@@ -126,7 +129,7 @@
         <div class="ec-icon" style="background:linear-gradient(135deg,#8a5a2b,#6b431e);box-shadow:0 4px 12px rgba(138,90,43,.25)">🏮</div>
         <div class="ec-text">
           <div class="ec-zh">每日积累</div>
-          <div class="ec-th">古诗文背诵与默写</div>
+          <div class="ec-th">古诗文注释与译文</div>
         </div>
         <div class="ec-arrow">→</div>
       </a>
@@ -135,7 +138,7 @@
         <div class="ec-icon" style="background:linear-gradient(135deg,#c05a5a,#9c3f3f);box-shadow:0 4px 12px rgba(192,90,90,.25)">📕</div>
         <div class="ec-text">
           <div class="ec-zh">错题本</div>
-          <div class="ec-th">错字、错题集中复习</div>
+          <div class="ec-th">错字错题集中复习</div>
         </div>
         <div class="ec-arrow">→</div>
       </a>
@@ -144,7 +147,7 @@
         <div class="ec-icon">💬</div>
         <div class="ec-text">
           <div class="ec-zh">AI 小老师</div>
-          <div class="ec-th">问字词、问阅读、问作文思路</div>
+          <div class="ec-th">问字词 · 问作文</div>
         </div>
         <div class="ec-arrow">→</div>
       </a>
