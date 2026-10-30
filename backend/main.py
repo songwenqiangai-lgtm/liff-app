@@ -1,4 +1,4 @@
-import os, io, csv, json, re, time, hmac, hashlib, ipaddress, secrets, base64
+import os, io, csv, json, re, time, hmac, hashlib, ipaddress, secrets, base64, random
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -1066,11 +1066,6 @@ def api_lesson(request: Request, lesson: str):
             except (TypeError, ValueError):
                 e["options"] = []
             e.pop("answer_type", None)
-        # 拿不准是不是当课内容的题，归到本单元「单元测验」
-        unit_quiz_count = conn.execute(
-            """SELECT COUNT(*) FROM items
-               WHERE book=? AND unit IS ? AND COALESCE(scope,'lesson')='unit'""",
-            (book, unit)).fetchone()[0]
         exam = [dict(r) for r in conn.execute(
             """SELECT id, question_zh, option_a, option_b, option_c, option_d,
                       score, q_type, passage_id
@@ -1092,7 +1087,6 @@ def api_lesson(request: Request, lesson: str):
             "sections": phase_sections(phase, class_id),
             "hanzi": hanzi, "vocab": vocab, "text": text, "grammar": grammar,
             "exercises": exercises, "exam": exam, "poems": poems,
-            "unit_quiz_count": unit_quiz_count,
         }
 
     vocab = []
@@ -1125,8 +1119,8 @@ def api_lesson(request: Request, lesson: str):
 
 
 @app.get("/api/unit_quiz")
-def api_unit_quiz(request: Request, lesson: str):
-    """本单元「拿不准是不是当课内容」的题，按课分组，连答案和解析一起给（单元测验用）。"""
+def api_unit_quiz(request: Request, lesson: str, count: int = 20):
+    """单元测验：从本单元各课练习题里按课轮抽 20 题（选择题优先，题目对全体学生一致）。"""
     student = get_student(parse_token(request))
     book = student_book(student)
     conn = content_db()
@@ -1144,18 +1138,38 @@ def api_unit_quiz(request: Request, lesson: str):
            FROM items i
            JOIN lessons l ON l.book=i.book AND l.lesson_no=i.lesson_no
            LEFT JOIN passages p ON p.id=i.passage_id
-           WHERE i.book=? AND i.unit IS ? AND COALESCE(i.scope,'lesson')='unit'
+           WHERE i.book=? AND i.unit IS ? AND COALESCE(i.scope,'lesson')='lesson'
            ORDER BY CAST(i.lesson_no AS INTEGER), i.id""",
         (book, unit)).fetchall()
-    out = []
+
+    by_lesson, seen = {}, set()
     for r in rows:
         d = dict(r)
         try:
             d["options"] = json.loads(d.pop("options_json") or "[]")
         except (TypeError, ValueError):
             d["options"] = []
-        out.append(d)
-    return {"unit": unit, "count": len(out), "items": out}
+        prompt = (d["prompt_zh"] or "").strip()
+        if not prompt or not (d["answer"] or "").strip() or prompt in seen:
+            continue
+        seen.add(prompt)
+        by_lesson.setdefault(str(d["lesson_no"]), []).append(d)
+
+    # 固定种子：同一本书同一单元，所有学生拿到的题目相同，便于横向比较
+    rnd = random.Random(f"{book}:{unit}")
+    for lst in by_lesson.values():
+        rnd.shuffle(lst)
+        lst.sort(key=lambda x: 0 if len(x["options"]) >= 2 else 1)  # 选择题优先
+
+    order = sorted(by_lesson, key=lambda k: int(k) if k.isdigit() else 0)
+    picked, i = [], 0
+    while len(picked) < count and any(by_lesson[k] for k in order):
+        k = order[i % len(order)]
+        if by_lesson[k]:
+            picked.append(by_lesson[k].pop(0))
+        i += 1
+    rnd.shuffle(picked)
+    return {"unit": unit, "count": len(picked), "items": picked}
 
 
 class ExamSubmitReq(BaseModel):
