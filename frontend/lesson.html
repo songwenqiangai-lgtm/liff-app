@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>บทเรียน · 课程</title>
-  <link rel="stylesheet" href="/assets/style.css?v=12">
+  <link rel="stylesheet" href="/assets/style.css?v=15">
   <style>
     /* 课文每句布局 */
     .sent-line { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0;
@@ -69,21 +69,20 @@
         { key: "pronounce", icon: "🗣️", zh: "发音", th: "ออกเสียง", on: DATA.sections.exercise },
         { key: "exam", icon: "📝", zh: "考试", th: "ข้อสอบ", on: DATA.sections.exam },
       ];
+      app.className = "fit-screen";
       app.innerHTML = `
         <div class="top-bar">
           <a class="back" href="/">← กลับ 返回</a>
           <h1 class="t-cn">${App.escapeHtml(title)}</h1>
           <a class="btn btn-ghost btn-icon" href="lesson.html?lesson=${Math.min(parseInt(LESSON) + 1, 99)}" title="下一课">→</a>
         </div>
-        <div class="app-wrap fade-in">
-          <p class="muted" style="text-align:center;margin-top: var(--s-2)">เลือกหัวข้อเพื่อเริ่มเรียน · 选择模块开始学习</p>
-          <div class="module-grid-2">
+        <div class="fit-body">
+          <div class="fit-grid">
             ${modules.map(m => `
-              <a class="module-card ${m.on ? "" : "locked"}" ${m.on ? `href="lesson.html?lesson=${LESSON}&module=${m.key}"` : ""}>
-                <div class="mc-icon">${m.icon}</div>
-                <div class="mc-zh">${m.zh}</div>
-                <div class="mc-th">${m.th}</div>
-                ${m.on ? '<div class="mc-arrow">→</div>' : ""}
+              <a class="fit-card ${m.on ? "" : "locked"}" ${m.on ? `href="lesson.html?lesson=${LESSON}&module=${m.key}"` : ""}>
+                <div class="fc-icon">${m.icon}</div>
+                <div class="fc-title">${m.zh}</div>
+                <div class="fc-sub">${m.th}</div>
               </a>`).join("")}
           </div>
         </div>`;
@@ -495,33 +494,29 @@
         { key: "practice", desc: `共 ${nEx + nExam} 题 · 当课`, on: nEx + nExam > 0 },
         { key: "pronounce", desc: "跟读评测", on: !!DATA.text },
       ];
+      app.className = "fit-screen";
       app.innerHTML = `
         <div class="top-bar">
           <a class="back" href="lessons.html">← 返回</a>
           <h1 class="t-cn">${App.escapeHtml(title)}</h1>
           <a class="btn btn-ghost btn-icon" href="lesson.html?lesson=${parseInt(LESSON) + 1}" title="下一课">→</a>
         </div>
-        <div class="app-wrap fade-in">
-          <p class="muted" style="text-align:center;margin-top: var(--s-2)">选择模块开始学习</p>
-          <div class="module-grid-2">
+        <div class="fit-body">
+          <div class="fit-grid">
             ${mods.map(m => {
               const [icon, zh] = NATIVE_LABELS[m.key];
-              return `<a class="module-card ${m.on ? "" : "locked"}" ${m.on ? `href="lesson.html?lesson=${LESSON}&module=${m.key}"` : ""}>
-                <div class="mc-icon">${icon}</div>
-                <div class="mc-zh">${zh}</div>
-                <div class="mc-th">${m.desc}</div>
-                ${m.on ? '<div class="mc-arrow">→</div>' : ""}
+              return `<a class="fit-card ${m.on ? "" : "locked"}" ${m.on ? `href="lesson.html?lesson=${LESSON}&module=${m.key}"` : ""}>
+                <div class="fc-icon">${icon}</div>
+                <div class="fc-title">${zh}</div>
+                <div class="fc-sub">${m.desc}</div>
               </a>`;
             }).join("")}
+            <a class="fit-card wide" href="writing.html">
+              <div class="fc-icon">✍️</div>
+              <div class="fc-title">习作</div>
+              <div class="fc-sub">每单元一次 · AI 反馈</div>
+            </a>
           </div>
-          <a class="card" href="writing.html" style="display:flex;align-items:center;gap:10px;margin-top:14px;text-decoration:none">
-            <span style="font-size:1.4rem">✍️</span>
-            <span style="flex:1">
-              <b class="t-cn" style="display:block">习作</b>
-              <span class="muted" style="font-size:.8rem">每单元一次 · AI 反馈</span>
-            </span>
-            <span class="muted">→</span>
-          </a>
         </div>`;
     }
 
@@ -734,23 +729,30 @@
         <div class="card" style="margin-top:10px">
           <h2 style="font-size:1rem;margin-bottom:10px">✍️ 听写</h2>
           <label style="font-size:.85rem;color:var(--c-muted)">范围</label>
-          <select id="d-scope" style="width:100%;margin:6px 0 12px;padding:10px;border-radius:10px;border:1px solid var(--c-line-2)">
-            ${hasWords ? '<option value="words">词语表</option>' : ""}
-            ${hasChars ? '<option value="chars">生字表</option>' : ""}
-          </select>
+          <div class="chip-group" id="d-scope" style="margin:6px 0 12px">
+            ${hasWords ? '<button type="button" class="chip sel" data-v="words">词语表</button>' : ""}
+            ${hasChars ? `<button type="button" class="chip${hasWords ? "" : " sel"}" data-v="chars">生字表</button>` : ""}
+          </div>
           <label style="font-size:.85rem;color:var(--c-muted)">方式</label>
-          <select id="d-mode" style="width:100%;margin:6px 0 12px;padding:10px;border-radius:10px;border:1px solid var(--c-line-2)">
-            <option value="audio2word">语音听写（听发音，写词语）</option>
-            <option value="pinyin2word">看拼音写词语</option>
-            <option value="word2pinyin">词语注音（写拼音）</option>
-          </select>
+          <div class="chip-group" id="d-mode" style="margin:6px 0 12px">
+            <button type="button" class="chip sel" data-v="audio2word">🔊 听音写词</button>
+            <button type="button" class="chip" data-v="pinyin2word">看拼音写词</button>
+            <button type="button" class="chip" data-v="word2pinyin">看词写拼音</button>
+          </div>
           <button class="btn btn-primary btn-block btn-lg" id="d-start">开始听写</button>
           <p class="muted" style="font-size:.78rem;margin-top:10px">听写完成后自动记录成绩，答错的字词会进入错题本。</p>
         </div>`;
+      body.querySelectorAll(".chip-group").forEach(g => {
+        g.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+          g.querySelectorAll(".chip").forEach(x => x.classList.remove("sel"));
+          c.classList.add("sel");
+        });
+      });
       document.getElementById("d-start").onclick = () => {
-        const scope = document.getElementById("d-scope").value;
-        const mode = document.getElementById("d-mode").value;
-        startDictation(body, scope, mode);
+        const scope = document.querySelector("#d-scope .chip.sel");
+        const mode = document.querySelector("#d-mode .chip.sel");
+        if (!scope || !mode) { alert("请选择范围和方式"); return; }
+        startDictation(body, scope.dataset.v, mode.dataset.v);
       };
     }
 

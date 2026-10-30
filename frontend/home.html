@@ -4,42 +4,47 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>หน้าหลัก · 中文小老师</title>
-  <link rel="stylesheet" href="/assets/style.css?v=12">
+  <link rel="stylesheet" href="/assets/style.css?v=15">
   <style>
-    .home-hero { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-4) var(--s-3); }
-    .home-hero img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); flex-shrink: 0; }
+    .home-screen { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+    .home-hero { flex: none; display: flex; align-items: center; gap: var(--s-3);
+      padding: var(--s-3) var(--s-4) var(--s-1); }
+    .home-hero img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; box-shadow: var(--sh-1); flex-shrink: 0; }
     .home-hero .who { flex: 1; min-width: 0; }
-    .home-hero .name { font-weight: 700; font-size: 1.05rem; color: var(--c-text);
+    .home-hero .name { font-weight: 700; font-size: 1rem; color: var(--c-text);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .home-hero .role { color: var(--c-muted); font-size: .8rem;
+    .home-hero .role { color: var(--c-muted); font-size: .74rem;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .home-hero .bell { flex-shrink: 0; }
-    .logout-bar { padding: var(--s-4) var(--s-4) calc(var(--s-6) + env(safe-area-inset-bottom)); }
+    .home-hero .bell { flex-shrink: 0; position: relative; }
+    .logout-bar { flex: none; padding: var(--s-2) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom)); }
     .logout-btn { display: block; width: 100%; padding: 14px; border-radius: var(--r-md);
       background: #fff; color: var(--c-muted); border: 1px solid var(--c-line-2);
       font-size: .9rem; font-family: inherit; cursor: pointer; }
     .logout-btn:active { background: var(--c-primary-l); }
-    .entry-grid { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-3) var(--s-4); }
-    .entry-card { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-5) var(--s-5);
-      background: #fff; border-radius: var(--r-xl); box-shadow: var(--sh-2);
-      text-decoration: none; color: inherit; transition: all var(--t-norm); position: relative; overflow: hidden; }
-    .entry-card:active { transform: scale(.98); }
-    .entry-card .ec-icon { width: 64px; height: 64px; border-radius: 20px;
+    .entry-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, 1fr);
+      grid-auto-rows: minmax(0, 1fr); gap: var(--s-2); padding: var(--s-2) var(--s-4); }
+    .entry-card { display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 5px; padding: var(--s-2); background: #fff; border-radius: var(--r-lg);
+      box-shadow: var(--sh-2); text-decoration: none; color: inherit; text-align: center;
+      aspect-ratio: 1 / 1; max-height: 100%; overflow: hidden;
+      transition: all var(--t-norm); position: relative; }
+    .entry-card:active { transform: scale(.97); }
+    .entry-card .ec-icon { width: 40px; height: 40px; border-radius: 13px;
       background: linear-gradient(135deg, var(--c-primary), var(--c-primary-d));
       color: #fff; display: flex; align-items: center; justify-content: center;
-      font-size: 1.8rem; flex-shrink: 0; box-shadow: 0 4px 12px rgba(31,138,95,.25); }
-    .entry-card.ask .ec-icon { background: linear-gradient(135deg, #2e6cb0, #1f4e8a); box-shadow: 0 4px 12px rgba(46,108,176,.25); }
-    .entry-card.report .ec-icon { background: linear-gradient(135deg, #7b5cc4, #5a3f9e); box-shadow: 0 4px 12px rgba(123,92,196,.25); }
-    .entry-card .ec-text { flex: 1; }
-    .entry-card .ec-zh { font-weight: 700; font-size: 1.1rem; color: var(--c-text); font-family: "Noto Sans SC", sans-serif; }
-    .entry-card .ec-th { color: var(--c-muted); font-size: .85rem; margin-top: 2px; }
-    .entry-card .ec-arrow { color: var(--c-muted); font-size: 1.2rem; }
-    .home-mascot { display: flex; justify-content: center; margin: var(--s-6) 0 var(--s-4); }
-    .home-mascot svg { width: 100px; height: 100px; }
+      font-size: 1.15rem; flex-shrink: 0; box-shadow: 0 3px 10px rgba(31,138,95,.25); }
+    .entry-card.ask .ec-icon { background: linear-gradient(135deg, #2e6cb0, #1f4e8a); box-shadow: 0 3px 10px rgba(46,108,176,.25); }
+    .entry-card.report .ec-icon { background: linear-gradient(135deg, #7b5cc4, #5a3f9e); box-shadow: 0 3px 10px rgba(123,92,196,.25); }
+    .entry-card .ec-zh { font-weight: 700; font-size: .92rem; color: var(--c-text);
+      font-family: "Noto Sans SC", sans-serif; line-height: 1.3; }
+    .entry-card .ec-th { color: var(--c-muted); font-size: .66rem; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .entry-card .ec-arrow { display: none; }
+    .entry-grid .entry-card:last-child:nth-child(odd) { grid-column: span 2; aspect-ratio: auto; }
   </style>
 </head>
 <body>
-  <div class="app-wrap">
+  <div class="home-screen">
     <div class="home-hero">
       <a href="profile.html" style="flex-shrink:0"><img src="/assets/logo.jpg" alt="" id="me-avatar"></a>
       <div class="who">
@@ -154,21 +159,6 @@
       </a>
     </div>
 
-    <div class="home-mascot">
-      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="50" cy="50" r="46" fill="#fff" stroke="#1f8a5f" stroke-width="3"/>
-        <circle cx="26" cy="32" r="11" fill="#1f3d33"/>
-        <circle cx="74" cy="32" r="11" fill="#1f3d33"/>
-        <circle cx="42" cy="50" r="3" fill="#1f3d33"/>
-        <circle cx="58" cy="50" r="3" fill="#1f3d33"/>
-        <circle cx="42" cy="50" r="1" fill="#fff"/>
-        <circle cx="58" cy="50" r="1" fill="#fff"/>
-        <ellipse cx="50" cy="60" rx="2.5" ry="1.5" fill="#1f3d33"/>
-        <path d="M 45 65 Q 50 70 55 65" stroke="#1f3d33" stroke-width="2" fill="none" stroke-linecap="round"/>
-        <text x="50" y="88" text-anchor="middle" font-size="10" fill="#1f8a5f" font-weight="600">加油！</text>
-      </svg>
-    </div>
-
     <div class="logout-bar">
       <button class="logout-btn" id="btn-out">🚪 ออกจากระบบ · 退出登录</button>
     </div>
@@ -178,8 +168,8 @@
   <script>
     function applyMode(mode) {
       const native = mode === "native";
-      document.getElementById("l2-entries").style.display = native ? "none" : "flex";
-      document.getElementById("zh-entries").style.display = native ? "flex" : "none";
+      document.getElementById("l2-entries").style.display = native ? "none" : "grid";
+      document.getElementById("zh-entries").style.display = native ? "grid" : "none";
       if (native) {
         App.call("/api/homework").then(r => {
           const pending = (r.assignments || []).filter(a => a.status === "pending").length;
