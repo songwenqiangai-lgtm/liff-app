@@ -1195,7 +1195,7 @@ def api_exam_submit(req: ExamSubmitReq, request: Request):
     results, correct_count = [], 0
     for r in rows:
         chosen = answer_map.get(r["id"], "")
-        correct = bool(chosen) and chosen == r["correct"]
+        correct = bool(chosen) and chosen == (r["correct"] or "").strip().upper()
         if correct:
             correct_count += 1
         results.append({
