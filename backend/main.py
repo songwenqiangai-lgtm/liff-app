@@ -1067,9 +1067,11 @@ def api_lesson(request: Request, lesson: str):
                 e["options"] = []
             e.pop("answer_type", None)
         exam = [dict(r) for r in conn.execute(
-            """SELECT id, question_zh, option_a, option_b, option_c, option_d,
-                      score, q_type, passage_id
-               FROM exams WHERE book=? AND lesson_no=? ORDER BY id""",
+            """SELECT e.id, e.question_zh, e.option_a, e.option_b, e.option_c, e.option_d,
+                      e.score, e.q_type, e.passage_id,
+                      p.title AS passage_title, p.body AS passage_body
+               FROM exams e LEFT JOIN passages p ON p.id = e.passage_id
+               WHERE e.book=? AND e.lesson_no=? ORDER BY e.id""",
             (book, lesson)).fetchall()]
         poems = [dict(r) for r in conn.execute(
             """SELECT id, title, author, dynasty, genre, body, notes_json,
@@ -1109,7 +1111,10 @@ def api_lesson(request: Request, lesson: str):
         "SELECT id,module,prompt_zh,prompt_th,answer,explanation_th FROM items WHERE book=? AND lesson_no=? ORDER BY module,id",
         (book, lesson)).fetchall()]
     exam = [dict(r) for r in conn.execute(
-        "SELECT id,question_zh,question_th,option_a,option_b,option_c,option_d FROM exams WHERE book=? AND lesson_no=? ORDER BY id",
+        """SELECT e.id,e.question_zh,e.question_th,e.option_a,e.option_b,e.option_c,e.option_d,
+                  p.title AS passage_title, p.body AS passage_body
+           FROM exams e LEFT JOIN passages p ON p.id = e.passage_id
+           WHERE e.book=? AND e.lesson_no=? ORDER BY e.id""",
         (book, lesson)).fetchall()]
     return {
         "lesson_no": lesson, "book": book, "sections": phase_sections(phase),

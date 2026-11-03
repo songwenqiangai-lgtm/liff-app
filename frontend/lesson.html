@@ -51,7 +51,9 @@
         return;
       }
       if (DATA.ui_mode === "native") {
-        if (MODULE) renderNativeModule(MODULE);
+        const NATIVE_ALIAS = { exercise: "practice", exam: "practice" };
+        const mod = NATIVE_ALIAS[MODULE] || MODULE;
+        if (mod) renderNativeModule(mod);
         else renderNativeGrid();
       } else if (MODULE) renderModule(MODULE);
       else renderGrid();
@@ -413,10 +415,11 @@
               <span class="num">${i + 1}</span>
               <span class="t-mono" style="margin-left: auto">ข้อ ${i + 1}</span>
             </div>
+            ${q.passage_body ? `<details class="passage-box" ${q.passage_body.length < 260 ? "open" : ""}><summary>📄 ${App.escapeHtml(q.passage_title || "阅读短文")}</summary><div class="passage-body t-cn">${App.escapeHtml(q.passage_body)}</div></details>` : ""}
             <div class="exam-q-text t-cn">${App.escapeHtml(q.question_zh)}</div>
             <div class="exam-q-th">${App.escapeHtml(q.question_th || "")}</div>
             <div class="exam-options">
-              ${["A", "B", "C", "D"].map(l => `
+              ${["A", "B", "C", "D"].filter(l => (q["option_" + l.toLowerCase()] || "").trim()).map(l => `
                 <button class="exam-opt" data-q="${q.id}" data-opt="${l}">
                   <span class="letter">${l}</span>
                   <span class="t-cn">${App.escapeHtml(q["option_" + l.toLowerCase()] || "")}</span>
@@ -526,9 +529,12 @@
         </div>
         <div class="app-wrap fade-in"><div id="tab-content"></div></div>`;
       const el = document.getElementById("tab-content");
-      ({ hanzi: renderHanzi, text: renderTextZh, poem: renderPoem,
-         grammar: renderGrammarZh, practice: renderPractice,
-         unit_quiz: renderUnitQuizZh, pronounce: renderPronounceZh })[key](el);
+      const RENDERERS = {
+        hanzi: renderHanzi, text: renderTextZh, poem: renderPoem,
+        grammar: renderGrammarZh, practice: renderPractice,
+        unit_quiz: renderUnitQuizZh, pronounce: renderPronounceZh };
+      if (!RENDERERS[key]) { renderNativeGrid(); return; }
+      RENDERERS[key](el);
       window.scrollTo({ top: 0 });
     }
 
@@ -538,15 +544,25 @@
       el.innerHTML = `
         <div class="card" style="background:var(--c-primary-l);border:none">
           <b class="t-cn">练习题</b>
-          <p class="muted" style="font-size:.82rem;margin-top:4px">共 ${nEx + nExam} 题，做完一题 AI 老师马上批改。</p>
+          <p class="muted" style="font-size:.82rem;margin-top:4px">当课练习 ${nEx} 题 · 随堂测 ${nExam} 题，做完一题 AI 老师马上批改。</p>
+          ${nExam ? `<button class="btn btn-ghost btn-sm" id="pr-skip" style="margin-top:8px;padding:0;font-size:.8rem">跳过练习，直接做随堂测 →</button>` : ""}
         </div>
         <div id="pr-ex"></div>
-        <div id="pr-exam"></div>`;
+        ${nExam ? '<div id="pr-exam" style="display:none"></div>' : ""}`;
       const exEl = document.getElementById("pr-ex");
       const examEl = document.getElementById("pr-exam");
       examOffset = nEx;
-      if (nEx) renderExerciseZh(exEl); else exEl.remove();
-      if (nExam) renderExamZh(examEl); else examEl.remove();
+      // 随堂测不在练习第 1 题下面就出现，否则手机上看起来像"只有两道题就交卷"
+      const showExam = () => {
+        if (!examEl || examEl.dataset.ready) return;
+        examEl.dataset.ready = "1";
+        renderExamZh(examEl);
+        examEl.style.display = "";
+        window.scrollTo({ top: examEl.offsetTop - 60, behavior: "smooth" });
+      };
+      if (nExam) document.getElementById("pr-skip").onclick = showExam;
+      if (nEx) renderExerciseZh(exEl, nExam ? showExam : null); else exEl.remove();
+      if (nExam && !nEx) showExam();
     }
 
     /* ---------- 单元测验（当课之外的题） ---------- */
@@ -977,7 +993,7 @@
     /* ---------- 练习（中文） ---------- */
     let exIdxZh = 0, exBusyZh = false, examOffset = 0;
 
-    function renderExerciseZh(el) {
+    function renderExerciseZh(el, onFinish) {
       const items = DATA.exercises || [];
       if (!items.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无练习</div>'; return; }
       if (exIdxZh >= items.length) exIdxZh = 0;
@@ -1086,10 +1102,11 @@
               <button data-r="not_sure">🤔 不确定</button>
             </div>
           </div>
-          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top:16px">${exIdxZh === DATA.exercises.length - 1 ? "🎉 完成" : "下一题 →"}</button>`;
+          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top:16px">${exIdxZh === items.length - 1 ? (onFinish ? "📝 进入随堂测" : "🎉 完成") : "下一题 →"}</button>`;
         document.getElementById("btn-next").onclick = () => {
-          exIdxZh = exIdxZh === DATA.exercises.length - 1 ? 0 : exIdxZh + 1;
-          renderExerciseZh(el);
+          if (onFinish && exIdxZh === items.length - 1) { onFinish(); return; }
+          exIdxZh = exIdxZh === items.length - 1 ? 0 : exIdxZh + 1;
+          renderExerciseZh(el, onFinish);
           window.scrollTo({ top: 0, behavior: "smooth" });
         };
         const HINTS = { 1: r.hint1_zh, 2: r.hint2_zh, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
@@ -1138,9 +1155,10 @@
           <div class="card exam-card fade-in" data-qi="${q.id}">
             <div class="exam-q-meta"><span class="num">${examOffset + i + 1}</span>
               <span class="t-mono" style="margin-left:auto">${App.escapeHtml(q.q_type || "")}</span></div>
+            ${q.passage_body ? `<details class="passage-box" ${q.passage_body.length < 260 ? "open" : ""}><summary>📄 阅读短文：${App.escapeHtml(q.passage_title || "")}</summary><div class="passage-body t-cn">${App.escapeHtml(q.passage_body)}</div></details>` : ""}
             <div class="exam-q-text t-cn">${App.escapeHtml(q.question_zh)}</div>
             <div class="exam-options">
-              ${["A", "B", "C", "D"].map(l => `<button class="exam-opt" data-q="${q.id}" data-opt="${l}">
+              ${["A", "B", "C", "D"].filter(l => (q["option_" + l.toLowerCase()] || "").trim()).map(l => `<button class="exam-opt" data-q="${q.id}" data-opt="${l}">
                 <span class="letter">${l}</span><span class="t-cn">${App.escapeHtml(q["option_" + l.toLowerCase()] || "")}</span></button>`).join("")}
             </div>
           </div>`).join("") +
