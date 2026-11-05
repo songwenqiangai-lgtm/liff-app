@@ -538,31 +538,170 @@
       window.scrollTo({ top: 0 });
     }
 
-    /* ---------- 练习题（当课练习 + 随堂测合并为一个连续列表） ---------- */
+    /* ---------- 练习题（全选择题，做完一次性交卷） ---------- */
+    const PR = { items: [], idx: 0, answers: {}, result: null, busy: false };
+
     function renderPractice(el) {
-      const nEx = (DATA.exercises || []).length, nExam = (DATA.exam || []).length;
+      const items = DATA.exercises || [];
+      PR.items = items; PR.idx = 0; PR.answers = {}; PR.result = null; PR.busy = false;
+      if (!items.length) {
+        el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无选择题练习</div>' +
+          ((DATA.exam || []).length ? '<div id="pr-exam"></div>' : "");
+        if ((DATA.exam || []).length) renderExamZh(document.getElementById("pr-exam"));
+        return;
+      }
       el.innerHTML = `
         <div class="card" style="background:var(--c-primary-l);border:none">
           <b class="t-cn">练习题</b>
-          <p class="muted" style="font-size:.82rem;margin-top:4px">当课练习 ${nEx} 题 · 随堂测 ${nExam} 题，做完一题 AI 老师马上批改。</p>
-          ${nExam ? `<button class="btn btn-ghost btn-sm" id="pr-skip" style="margin-top:8px;padding:0;font-size:.8rem">跳过练习，直接做随堂测 →</button>` : ""}
+          <p class="muted" style="font-size:.82rem;margin-top:4px">共 ${items.length} 题，全部做完后一次交卷。</p>
+          <div class="progress" style="margin-top:10px"><div class="bar"><span id="pr-bar" style="width:0%"></span></div></div>
+          <div class="muted t-mono" style="font-size:.75rem;margin-top:4px"><span id="pr-count">0</span> / ${items.length} 已答</div>
         </div>
-        <div id="pr-ex"></div>
-        ${nExam ? '<div id="pr-exam" style="display:none"></div>' : ""}`;
-      const exEl = document.getElementById("pr-ex");
-      const examEl = document.getElementById("pr-exam");
-      examOffset = nEx;
-      // 随堂测不在练习第 1 题下面就出现，否则手机上看起来像"只有两道题就交卷"
-      const showExam = () => {
-        if (!examEl || examEl.dataset.ready) return;
-        examEl.dataset.ready = "1";
-        renderExamZh(examEl);
-        examEl.style.display = "";
-        window.scrollTo({ top: examEl.offsetTop - 60, behavior: "smooth" });
+        <div id="pr-body"></div>`;
+      renderPracticeQ(el);
+    }
+
+    function prUpdateHead() {
+      const done = PR.items.filter(it => PR.answers[it.id]).length;
+      const bar = document.getElementById("pr-bar"), cnt = document.getElementById("pr-count");
+      if (bar) bar.style.width = (done / PR.items.length * 100) + "%";
+      if (cnt) cnt.textContent = done;
+    }
+
+    function renderPracticeQ(el) {
+      const it = PR.items[PR.idx];
+      const opts = it.options || [];
+      const LETTERS = "ABCDEF";
+      const longOpt = opts.some(o => String(o).length > 12);
+      const cols = longOpt ? 1 : Math.min(Math.max(opts.length, 2), 4);
+      const picked = PR.answers[it.id] || "";
+      const passage = it.passage_body
+        ? `<details class="passage-box" ${it.passage_body.length < 260 ? "open" : ""}>
+             <summary>📄 阅读短文：${App.escapeHtml(it.passage_title || "")}</summary>
+             <div class="passage-body t-cn">${App.escapeHtml(it.passage_body)}</div>
+           </details>`
+        : "";
+      const last = PR.idx === PR.items.length - 1;
+      const answered = PR.items.filter(x => PR.answers[x.id]).length;
+      document.getElementById("pr-body").innerHTML = `
+        <div class="card fade-in">
+          <div class="exercise-header">
+            <span class="muted t-mono">${PR.idx + 1} / ${PR.items.length}</span>
+            <span class="badge" style="background:var(--c-primary-l);color:var(--c-primary-d);padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:600">${App.escapeHtml(it.q_type || it.module || "练习")}</span>
+          </div>
+          ${passage}
+          <div class="exercise-q t-cn" style="white-space:pre-wrap">${App.escapeHtml(it.prompt_zh || "")}</div>
+          <div class="option-grid" style="grid-template-columns:repeat(${cols},1fr)">
+            ${opts.map((o, i) => {
+              const L = LETTERS[i];
+              return `<button class="opt-btn${picked === L ? " sel" : ""}" data-opt="${L}">
+                <b>${L}</b><span>${App.escapeHtml(String(o))}</span></button>`;
+            }).join("")}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-ghost" id="pr-prev" style="flex:0 0 auto" ${PR.idx === 0 ? "disabled" : ""}>← 上一题</button>
+          <button class="btn ${answered === PR.items.length ? "btn-primary" : "btn-ghost"}" id="pr-next" style="flex:1">
+            ${answered === PR.items.length ? "📤 交卷" : (last ? "交卷" : "下一题 →")}
+          </button>
+        </div>`;
+      document.querySelectorAll("#pr-body .opt-btn").forEach(b => {
+        b.onclick = () => {
+          PR.answers[it.id] = b.dataset.opt;
+          prUpdateHead();
+          if (!last) {
+            setTimeout(() => { PR.idx += 1; renderPracticeQ(el); }, 120);
+          } else {
+            renderPracticeQ(el);
+          }
+        };
+      });
+      document.getElementById("pr-prev").onclick = () => {
+        if (PR.idx > 0) { PR.idx -= 1; renderPracticeQ(el); }
       };
-      if (nExam) document.getElementById("pr-skip").onclick = showExam;
-      if (nEx) renderExerciseZh(exEl, nExam ? showExam : null); else exEl.remove();
-      if (nExam && !nEx) showExam();
+      document.getElementById("pr-next").onclick = () => {
+        const left = PR.items.filter(x => !PR.answers[x.id]);
+        if (left.length) {
+          PR.idx = PR.items.indexOf(left[0]);
+          renderPracticeQ(el);
+          alert(`还有 ${left.length} 题没答，先做完再交卷哦`);
+          return;
+        }
+        submitPractice(el);
+      };
+    }
+
+    async function submitPractice(el) {
+      if (PR.busy) return;
+      PR.busy = true;
+      document.getElementById("pr-body").innerHTML =
+        '<div class="card loading-pulse" style="text-align:center;padding:32px">正在判分...</div>';
+      const answers = PR.items.map(it => ({ item_id: it.id, chosen: PR.answers[it.id] || "" }));
+      try {
+        const r = await App.call("/api/practice/submit", {
+          method: "POST",
+          body: JSON.stringify({ lesson_no: LESSON, answers })
+        });
+        PR.result = r;
+        renderPracticeResult(el);
+      } catch (e) {
+        PR.busy = false;
+        document.getElementById("pr-body").innerHTML =
+          '<div class="card"><div class="error-text">判分失败，请稍后重试</div>' +
+          '<button class="btn btn-primary btn-block" id="pr-retry" style="margin-top:10px">重新交卷</button></div>';
+        document.getElementById("pr-retry").onclick = () => submitPractice(el);
+      }
+    }
+
+    function renderPracticeResult(el) {
+      const r = PR.result;
+      const wrong = r.results.filter(x => !x.is_correct);
+      const right = r.results.filter(x => x.is_correct);
+      const pct = r.score;
+      const color = pct >= 85 ? "var(--c-primary)" : (pct >= 60 ? "var(--c-accent)" : "var(--c-danger)");
+      const row = (x, i) => `
+        <div class="card" style="border-left:4px solid ${x.is_correct ? "var(--c-primary)" : "var(--c-danger)"}">
+          <div class="exercise-header" style="margin-bottom:6px">
+            <span class="badge" style="background:${x.is_correct ? "var(--c-primary-l)" : "#fdecec"};color:${x.is_correct ? "var(--c-primary-d)" : "#b33"};padding:3px 9px;border-radius:999px;font-size:.72rem">${x.is_correct ? "✅ 答对" : "❌ 答错"}</span>
+            <span class="muted t-mono" style="margin-left:auto;font-size:.75rem">${App.escapeHtml(x.q_type || "")}</span>
+          </div>
+          <div class="t-cn" style="font-weight:600;line-height:1.6">${i + 1}. ${App.escapeHtml(x.prompt_zh || "")}</div>
+          <div style="margin-top:8px;font-size:.92rem;line-height:1.9">
+            <div>你选了：<b style="color:${x.is_correct ? "var(--c-primary-d)" : "var(--c-danger)"}">${x.chosen ? x.chosen + "．" + App.escapeHtml(x.chosen_text) : "（未作答）"}</b></div>
+            <div>正确答案：<b style="color:var(--c-primary-d)">${x.answer}．${App.escapeHtml(x.answer_text)}</b></div>
+          </div>
+          ${x.explanation ? `<div class="explain-box" style="margin-top:8px"><b>为什么</b><br>${App.escapeHtml(x.explanation)}</div>` : ""}
+          ${!x.is_correct && x.chosen ? '<div class="muted" style="font-size:.78rem;margin-top:6px">已加入错题本，可在「错题本」里重练</div>' : ""}
+        </div>`;
+      const nExam = (DATA.exam || []).length;
+      document.getElementById("pr-body").innerHTML = `
+        <div class="card" style="text-align:center;background:var(--c-primary-l);border:none">
+          <div style="font-size:2rem;font-weight:800;color:${color}">${pct} 分</div>
+          <div class="muted" style="font-size:.85rem;margin-top:2px">答对 ${r.correct} / ${r.total} 题</div>
+        </div>
+        ${wrong.length ? `<div class="card" style="background:#fff8f0;border:none"><b>错题 ${wrong.length} 道</b>
+          <div class="muted" style="font-size:.82rem;margin-top:2px">已经放进错题本，记住正确答案和原因，下次就不会错了。</div></div>` : ""}
+        ${wrong.map((x, i) => row(x, i)).join("")}
+        ${right.length ? `<details class="card"><summary style="cursor:pointer;font-weight:600">✅ 答对的 ${right.length} 题</summary>
+          <div style="margin-top:8px;font-size:.9rem;line-height:1.9">
+            ${right.map(x => `<div>${App.escapeHtml((x.prompt_zh || "").slice(0, 40))}… → <b>${x.answer}．${App.escapeHtml(x.answer_text)}</b></div>`).join("")}
+          </div></details>` : ""}
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-ghost" id="pr-again" style="flex:1">再练一次</button>
+          <a class="btn btn-ghost" href="errors.html" style="flex:1;text-align:center">去错题本</a>
+        </div>
+        ${nExam ? '<button class="btn btn-primary btn-block btn-lg" id="pr-to-exam" style="margin-top:10px">继续做随堂测（' + nExam + ' 题）→</button><div id="pr-exam"></div>' : ""}`;
+      document.getElementById("pr-again").onclick = () => renderPractice(el);
+      if (nExam) {
+        document.getElementById("pr-to-exam").onclick = (e) => {
+          e.target.disabled = true;
+          e.target.textContent = "随堂测";
+          const box = document.getElementById("pr-exam");
+          box.innerHTML = '<div id="pr-exam-inner"></div>';
+          renderExamZh(document.getElementById("pr-exam-inner"));
+          window.scrollTo({ top: box.offsetTop - 60, behavior: "smooth" });
+        };
+      }
     }
 
     /* ---------- 单元测验（当课之外的题） ---------- */
@@ -990,157 +1129,7 @@
         </div>`).join("");
     }
 
-    /* ---------- 练习（中文） ---------- */
-    let exIdxZh = 0, exBusyZh = false, examOffset = 0;
-
-    function renderExerciseZh(el, onFinish) {
-      const items = DATA.exercises || [];
-      if (!items.length) { el.innerHTML = '<div class="card muted" style="text-align:center">本课暂无练习</div>'; return; }
-      if (exIdxZh >= items.length) exIdxZh = 0;
-      const it = items[exIdxZh];
-      const passage = it.passage_body
-        ? `<details class="passage-box" ${it.passage_body.length < 260 ? "open" : ""}>
-             <summary>📄 阅读短文：${App.escapeHtml(it.passage_title || "")}</summary>
-             <div class="passage-body t-cn">${App.escapeHtml(it.passage_body)}</div>
-           </details>`
-        : "";
-      const opts = Array.isArray(it.options) ? it.options : [];
-      const promptOptCount = (it.prompt_zh.match(/(^|[\s\n])[A-D][．.、]/g) || []).length;
-      const legacyMcq = !opts.length && /^[A-D]$/i.test((it.answer || "").trim()) && promptOptCount >= 3;
-      const answerLen = (it.answer || "").replace(/[；;、,，\s]/g, "").length;
-      let answerBox;
-      if (opts.length >= 2) {
-        const LETTERS = "ABCD";
-        const longOpt = opts.some(o => String(o).length > 12);
-        const cols = longOpt ? 1 : Math.min(opts.length, 4);
-        answerBox = `
-          <div class="option-grid" id="opt-grid" style="grid-template-columns:repeat(${cols},1fr)">
-            ${opts.map((o, i) => `<button class="opt-btn" data-opt="${LETTERS[i]}">
-                <b>${LETTERS[i]}</b><span>${App.escapeHtml(String(o))}</span>
-              </button>`).join("")}
-          </div>
-          <input type="hidden" id="input" value="">`;
-      } else if (legacyMcq) {
-        answerBox = `
-          <div class="option-grid" id="opt-grid">
-            ${["A", "B", "C", "D"].map(L => `<button class="opt-btn" data-opt="${L}"><b>${L}</b></button>`).join("")}
-          </div>
-          <input type="hidden" id="input" value="">`;
-      } else if (answerLen <= 20) {
-        answerBox = `<div class="exercise-input">
-            <input type="text" id="input" autocomplete="off" placeholder="在这里写下答案">
-          </div>`;
-      } else {
-        answerBox = `<div class="exercise-input">
-            <textarea id="input" placeholder="在这里写下你的答案..." rows="4"></textarea>
-          </div>`;
-      }
-      const isMcq = opts.length >= 2 || legacyMcq;
-      el.innerHTML = `
-        <div class="card fade-in">
-          <div class="exercise-header">
-            <span class="muted t-mono">${exIdxZh + 1} / ${items.length}</span>
-            <div class="progress"><div class="bar"><span style="width:${((exIdxZh + 1) / items.length) * 100}%"></span></div></div>
-            <span class="badge" style="background:var(--c-primary-l);color:var(--c-primary-d);padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:600">${App.escapeHtml(it.q_type || it.module || "练习")}</span>
-          </div>
-          ${passage}
-          <div class="exercise-q t-cn" style="white-space:pre-wrap">${App.escapeHtml(it.prompt_zh)}</div>
-          ${answerBox}
-          <button class="btn btn-primary btn-block btn-lg" id="btn-submit" style="margin-top:10px">提交</button>
-          <div id="feedback"></div>
-        </div>`;
-      if (isMcq) {
-        document.querySelectorAll(".opt-btn").forEach(b => {
-          b.onclick = () => {
-            document.querySelectorAll(".opt-btn").forEach(x => x.classList.remove("sel"));
-            b.classList.add("sel");
-            // 连选项内容一起提交，批改时既能认字母也能认意思
-            const txt = b.querySelector("span")?.textContent || "";
-            document.getElementById("input").value =
-              txt ? `${b.dataset.opt}. ${txt}` : b.dataset.opt;
-          };
-        });
-      }
-      document.getElementById("btn-submit").onclick = () => submitExerciseZh(it, el);
-    }
-
-    async function submitExerciseZh(it, el) {
-      if (exBusyZh) return;
-      const input = document.getElementById("input").value.trim();
-      if (!input) { alert("请先写出答案"); return; }
-      exBusyZh = true;
-      const btn = document.getElementById("btn-submit");
-      btn.disabled = true; btn.textContent = "AI 老师批改中...";
-      const fb = document.getElementById("feedback");
-      fb.innerHTML = '<div class="loading-pulse" style="margin-top:12px"><span>AI 老师正在看你的答案...</span></div>';
-      try {
-        const r = await App.call("/api/feedback", {
-          method: "POST",
-          body: JSON.stringify({ module: it.module, item_id: it.id, input_text: input })
-        });
-        const map = { correct: ["✅ 答对了", "correct"], partial: ["💡 接近了", "partial"], incorrect: ["💡 再想一想", "incorrect"] };
-        const [badge, cls] = map[r.verdict] || ["", ""];
-        fb.innerHTML = `
-          <div class="feedback-box ${cls} fade-in" style="margin-top:12px">
-            <div class="verdict-badge ${cls}">${badge}</div>
-            <div style="line-height:1.8">${App.escapeHtml(r.feedback_zh || "")}</div>
-            ${r.example_zh ? `<div style="margin-top:8px;font-size:.9rem">📖 范例：${App.escapeHtml(r.example_zh)}</div>` : ""}
-          </div>
-          <div class="hint-row">
-            ${r.hint1_zh ? '<button class="hint-pill" data-h="1">💡 提示一</button>' : ""}
-            ${r.hint2_zh ? '<button class="hint-pill" data-h="2">💡💡 提示二</button>' : ""}
-            ${r.example_zh ? '<button class="hint-pill" data-h="3">📖 范例</button>' : ""}
-            ${r.answer_zh ? '<button class="hint-pill" data-h="4">✅ 参考答案</button>' : ""}
-          </div>
-          <div id="reveals"></div>
-          ${it.explanation ? `<div class="explain-box" style="margin-top:10px"><b>为什么这么答</b><br>${App.escapeHtml(it.explanation)}</div>` : ""}
-          <div class="decision-row" id="decision-box">
-            <div class="d-q">AI 说得对吗？</div>
-            <div class="decision-opts">
-              <button data-r="agree">👍 同意</button>
-              <button data-r="disagree">👎 不同意</button>
-              <button data-r="not_sure">🤔 不确定</button>
-            </div>
-          </div>
-          <button class="btn btn-primary btn-block btn-lg" id="btn-next" style="margin-top:16px">${exIdxZh === items.length - 1 ? (onFinish ? "📝 进入随堂测" : "🎉 完成") : "下一题 →"}</button>`;
-        document.getElementById("btn-next").onclick = () => {
-          if (onFinish && exIdxZh === items.length - 1) { onFinish(); return; }
-          exIdxZh = exIdxZh === items.length - 1 ? 0 : exIdxZh + 1;
-          renderExerciseZh(el, onFinish);
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        };
-        const HINTS = { 1: r.hint1_zh, 2: r.hint2_zh, 3: "📖 " + (r.example_zh || ""), 4: "✅ " + (r.answer_zh || "") };
-        fb.querySelectorAll("[data-h]").forEach(b => b.onclick = () => {
-          const lv = parseInt(b.dataset.h);
-          b.disabled = true;
-          const div = document.createElement("div");
-          div.className = "revealed-hint";
-          div.innerHTML = "<b>提示</b> " + App.escapeHtml(HINTS[lv] || "");
-          document.getElementById("reveals").appendChild(div);
-          App.call("/api/hint", { method: "POST", body: JSON.stringify({ module: it.module, item_id: it.id, hint_level: lv }) }).catch(() => {});
-        });
-        fb.querySelectorAll("#decision-box [data-r]").forEach(b => b.onclick = async () => {
-          const box = document.getElementById("decision-box");
-          const kind = b.dataset.r;
-          let text = "";
-          if (kind === "disagree") text = (prompt("说说你为什么不同意（可留空）") || "").trim();
-          box.querySelectorAll("[data-r]").forEach(x => { x.disabled = true; });
-          b.classList.add("chosen");
-          try {
-            await App.call("/api/feedback/reason", {
-              method: "POST",
-              body: JSON.stringify({ reason_type: kind, reason_text: text, item_id: it.id })
-            });
-          } catch (e) {}
-          box.insertAdjacentHTML("beforeend", '<div class="decision-done" style="margin-top:8px">✅ 已记录</div>');
-        });
-      } catch (e) {
-        fb.innerHTML = '<div class="feedback-box error-text" style="margin-top:12px">提交失败，请稍后重试</div>';
-      } finally {
-        exBusyZh = false;
-        btn.disabled = false; btn.textContent = "提交";
-      }
-    }
+    let examOffset = 0;
 
     /* ---------- 随堂测（中文） ---------- */
     function renderExamZh(el) {

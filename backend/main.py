@@ -1066,6 +1066,8 @@ def api_lesson(request: Request, lesson: str):
             except (TypeError, ValueError):
                 e["options"] = []
             e.pop("answer_type", None)
+        # 练习只保留选择题：没有选项的（写话、仿写、多空等主观题）不进练习列表
+        exercises = [e for e in exercises if len(e["options"]) >= 2]
         exam = [dict(r) for r in conn.execute(
             """SELECT e.id, e.question_zh, e.option_a, e.option_b, e.option_c, e.option_d,
                       e.score, e.q_type, e.passage_id,
@@ -1210,14 +1212,85 @@ def api_exam_submit(req: ExamSubmitReq, request: Request):
             "explanation": r["explanation_th"], "explanation_th": r["explanation_th"],
             "q_type": r["q_type"] if "q_type" in r.keys() else None,
         })
-        if native and not correct and chosen:
-            upsert_error(student["id"], "exam", r["id"],
-                         r["q_type"] if "q_type" in r.keys() else None, None)
+        if native:
+            log_event(student, "input_submit", "exam", r["id"], chosen or None,
+                      ai_latency_ms=0,
+                      response_json={"verdict": "correct" if correct else "incorrect",
+                                     "graded_by": "preset", "chosen": chosen,
+                                     "answer": (r["correct"] or "").strip().upper()})
+            if not correct and chosen:
+                upsert_error(student["id"], "exam", r["id"],
+                             r["q_type"] if "q_type" in r.keys() else None, None)
     total = len(rows)
     score = round(correct_count / total * 100) if total else 0
     if native:
         _auto_complete_homework(student, "exam", req.lesson_no, score)
     log_event(student, "exam_submit", input_text=None,
+              response_json={"lesson_no": req.lesson_no, "score": score,
+                             "total": total, "correct": correct_count})
+    return {"score": score, "total": total, "correct": correct_count, "results": results}
+
+
+# ---------- 练习批量判分（中文班：选择题，一次交卷） ----------
+class PracticeSubmitReq(BaseModel):
+    lesson_no: str
+    answers: list  # [{item_id:int, chosen:"A"|"B"|"C"|"D"}]
+
+
+@app.post("/api/practice/submit")
+def api_practice_submit(req: PracticeSubmitReq, request: Request):
+    """整课练习一次交卷：按预存答案判分，答错的直接进错题本。"""
+    student = get_student(parse_token(request))
+    if not is_native(student["class_id"]):
+        raise HTTPException(400, "practice batch grading is native-only")
+    book = student_book(student)
+    conn = content_db()
+    rows = []
+    for r in conn.execute(
+        """SELECT i.id, i.module, i.prompt_zh, i.answer, i.options_json, i.q_type, i.tags,
+                  COALESCE(i.explanation_zh, i.explanation_th, '') AS explanation
+           FROM items i
+           WHERE i.book=? AND i.lesson_no=? AND COALESCE(i.scope,'lesson')='lesson'
+           ORDER BY i.module, i.id""",
+        (book, req.lesson_no)).fetchall():
+        d = dict(r)
+        try:
+            d["options"] = json.loads(d.pop("options_json") or "[]")
+        except (TypeError, ValueError):
+            d["options"] = []
+        if len(d["options"]) >= 2:
+            rows.append(d)
+    answer_map = {int(a.get("item_id")): (a.get("chosen") or "").strip().upper()
+                  for a in req.answers if isinstance(a, dict)}
+    results, correct_count = [], 0
+    for r in rows:
+        opts = r["options"]
+        chosen = answer_map.get(r["id"], "")
+        if len(chosen) != 1 or not ("A" <= chosen <= "Z") or ord(chosen) - 65 >= len(opts):
+            chosen = ""
+        answer = (r["answer"] or "").strip().upper()
+        ok = bool(chosen) and chosen == answer
+        chosen_text = opts[ord(chosen) - 65] if chosen else ""
+        answer_text = opts[ord(answer) - 65] if len(answer) == 1 and ord(answer) - 65 < len(opts) else answer
+        if ok:
+            correct_count += 1
+        log_event(student, "input_submit", r["module"], r["id"], chosen or None,
+                  ai_latency_ms=0,
+                  response_json={"verdict": "correct" if ok else "incorrect",
+                                 "graded_by": "preset", "chosen": chosen,
+                                 "answer": answer})
+        if not ok and chosen:
+            upsert_error(student["id"], "exercise", r["id"], r["q_type"], r["tags"])
+        results.append({
+            "item_id": r["id"], "prompt_zh": r["prompt_zh"],
+            "q_type": r["q_type"], "chosen": chosen, "chosen_text": chosen_text,
+            "answer": answer, "answer_text": answer_text,
+            "is_correct": ok, "explanation": r["explanation"],
+        })
+    total = len(results)
+    score = round(correct_count / total * 100) if total else 0
+    _auto_complete_homework(student, "exercise", req.lesson_no, score)
+    log_event(student, "practice_submit", module="practice",
               response_json={"lesson_no": req.lesson_no, "score": score,
                              "total": total, "correct": correct_count})
     return {"score": score, "total": total, "correct": correct_count, "results": results}
@@ -2500,19 +2573,75 @@ def api_errors(request: Request, limit: int = 100):
     hanzi = fetch("hanzi", ids["dictation"])
     poems = fetch("poems", ids["recitation"])
     words = fetch("vocab", ids["dictation_word"])
+
+    # 学生最近一次的错误选择：错题本要显示"你选了 X / 正确答案 Y"
+    last_pick = {}
+    if ids["exercise"]:
+        ph = ",".join("?" * len(ids["exercise"]))
+        for lg in get_conn().execute(
+                f"""SELECT item_id, input_text FROM logs
+                    WHERE student_id=? AND event_type='input_submit'
+                      AND item_id IN ({ph})
+                      AND json_extract(response_json,'$.verdict') IN ('incorrect','partial')
+                    ORDER BY id""",
+                [student["id"], *ids["exercise"]]).fetchall():
+            last_pick[lg["item_id"]] = (lg["input_text"] or "").strip().upper()
+
+    # 随堂测的 id 和练习题的 id 是两套，用 module='exam' 区分
+    last_pick_exam = {}
+    if ids["exam"]:
+        ph = ",".join("?" * len(ids["exam"]))
+        for lg in get_conn().execute(
+                f"""SELECT item_id, input_text FROM logs
+                    WHERE student_id=? AND event_type='input_submit' AND module='exam'
+                      AND item_id IN ({ph})
+                      AND json_extract(response_json,'$.verdict') IN ('incorrect','partial')
+                    ORDER BY id""",
+                [student["id"], *ids["exam"]]).fetchall():
+            last_pick_exam[lg["item_id"]] = (lg["input_text"] or "").strip().upper()
+
+    def letters_options(raw):
+        try:
+            return json.loads(raw or "[]")
+        except (TypeError, ValueError):
+            return []
+
+    def pick_text(opts, letter):
+        if len(letter) == 1 and "A" <= letter <= "Z" and ord(letter) - 65 < len(opts):
+            return opts[ord(letter) - 65]
+        return ""
+
     out = []
     for r in rows:
         d = dict(r)
         ref = None
         if r["source"] == "exercise" and r["ref_id"] in items:
             it = items[r["ref_id"]]
+            opts = letters_options(it.get("options_json"))
+            answer = (it.get("answer") or "").strip().upper()
+            chosen = last_pick.get(r["ref_id"], "")
+            # 老接口提交的是 "B. 选项文字"，这里只取字母
+            m = re.match(r"([A-Z])(?![A-Za-z])", chosen)
+            chosen = m.group(1) if m else (chosen if len(chosen) == 1 else "")
             ref = {"text": it["prompt_zh"], "q_type": it.get("q_type"),
-                   "lesson": it["lesson_no"], "answer": it.get("answer"),
+                   "lesson": it["lesson_no"], "answer": answer,
+                   "options": opts,
+                   "answer_text": pick_text(opts, answer) or answer,
+                   "chosen": chosen,
+                   "chosen_text": pick_text(opts, chosen),
+                   "explanation": it.get("explanation_zh") or it.get("explanation_th") or "",
                    "href": f"lesson.html?lesson={it['lesson_no']}&module=exercise"}
         elif r["source"] == "exam" and r["ref_id"] in exams:
             ex = exams[r["ref_id"]]
+            opts = [ex.get("option_" + L) or "" for L in "abcd"]
+            opts = [o for o in opts if str(o).strip()]
+            answer = (ex.get("correct") or "").strip().upper()
+            chosen = last_pick_exam.get(r["ref_id"], "")
             ref = {"text": ex["question_zh"], "q_type": ex.get("q_type"),
-                   "lesson": ex["lesson_no"], "answer": ex.get("correct"),
+                   "lesson": ex["lesson_no"], "answer": answer,
+                   "options": opts, "answer_text": pick_text(opts, answer) or answer,
+                   "chosen": chosen, "chosen_text": pick_text(opts, chosen),
+                   "explanation": ex.get("explanation_th") or "",
                    "href": f"lesson.html?lesson={ex['lesson_no']}&module=exam"}
         elif r["source"] == "dictation" and r["ref_id"] in hanzi:
             hz = hanzi[r["ref_id"]]
