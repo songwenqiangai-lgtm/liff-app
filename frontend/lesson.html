@@ -514,6 +514,11 @@
                 <div class="fc-sub">${m.desc}</div>
               </a>`;
             }).join("")}
+            ${DATA.garden ? `<a class="fit-card" href="garden.html?unit=${DATA.unit}">
+                <div class="fc-icon">📚</div>
+                <div class="fc-title">语文园地</div>
+                <div class="fc-sub">交流平台 · 词句段 · 日积月累</div>
+              </a>` : ""}
           </div>
         </div>`;
     }

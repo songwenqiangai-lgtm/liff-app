@@ -170,6 +170,16 @@ def seed_demo_config():
 
 
 app = FastAPI(title="Thai-Chinese Tutor LIFF")
+
+
+@app.middleware("http")
+async def html_no_cache(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
 init_db()
 seed_items()
 seed_demo_config()   # 先铺二语班演示配置（中文班在其内部被跳过）
@@ -1093,6 +1103,9 @@ def api_lesson(request: Request, lesson: str):
         return {
             "lesson_no": lesson, "title": lesson_row["title"], "unit": unit,
             "book": book, "ui_mode": "native",
+            "garden": conn.execute(
+                "SELECT 1 FROM unit_garden WHERE book=? AND unit=? LIMIT 1",
+                (book, unit)).fetchone() is not None,
             "sections": phase_sections(phase, class_id),
             "hanzi": hanzi, "vocab": vocab, "text": text, "grammar": grammar,
             "exercises": exercises, "exam": exam, "poems": poems,

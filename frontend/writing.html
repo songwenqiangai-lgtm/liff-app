@@ -81,7 +81,7 @@
       app.innerHTML = `
         <div class="card fade-in">
           <h2 class="t-cn" style="font-size:1.15rem">${App.escapeHtml(t.title)}</h2>
-          <div class="muted" style="font-size:.85rem;margin-top:4px">第${t.unit}单元 · 不少于 ${t.min_words || 400} 字</div>
+          <div class="muted" style="font-size:.85rem;margin-top:4px">第${t.unit}单元 · 不少于 ${t.min_words || 200} 字</div>
           <div class="t-cn" style="margin-top:12px;line-height:1.9;white-space:pre-wrap">${App.escapeHtml(t.prompt || "")}</div>
           ${t.requirements ? `<div class="explain-box" style="margin-top:10px"><b>写作要求</b><br>${App.escapeHtml(t.requirements)}</div>` : ""}
           ${renderGuide(t.guide)}
@@ -128,7 +128,7 @@
       document.getElementById("w-submit").onclick = async () => {
         const n = cnt();
         if (n < 50) { alert("作文还太短，再写一些吧"); return; }
-        if (n < (t.min_words || 400) * 0.8 && !confirm(`现在只有 ${n} 字，要求不少于 ${t.min_words || 400} 字，确定提交吗？`)) return;
+        if (n < (t.min_words || 200) * 0.8 && !confirm(`现在只有 ${n} 字，要求不少于 ${t.min_words || 200} 字，确定提交吗？`)) return;
         const btn = document.getElementById("w-submit");
         btn.disabled = true; btn.textContent = "AI 老师批改中，约需 20 秒...";
         try {
