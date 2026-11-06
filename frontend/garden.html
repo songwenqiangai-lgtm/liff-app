@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>语文园地 · 中文六年级</title>
+  <link rel="stylesheet" href="/assets/style.css?v=15">
+  <style>
+    .garden-text { font-size:1.08rem; line-height:2.1; white-space:pre-wrap; letter-spacing:.02em; }
+    .garden-quote { font-size:1.02rem; line-height:2; padding:10px 0; border-bottom:1px dashed var(--c-line); }
+    .garden-quote:last-child { border-bottom:none; }
+    .garden-quote .who { display:block; color:var(--c-muted); font-size:.82rem; text-align:right; }
+    .garden-item { margin-bottom:12px; }
+    .garden-ans { margin-top:10px; padding:10px 12px; background:var(--c-primary-bg); border-radius:10px; line-height:1.9; }
+    .garden-note { display:flex; gap:8px; font-size:.88rem; line-height:1.8; }
+    .garden-note b { color:var(--c-primary-d); flex:none; }
+    .btn-sm { padding:6px 14px; font-size:.85rem; min-height:0; border-radius:999px; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <a class="back" id="g-back" href="lessons.html">← 单元</a>
+    <h1 id="g-title">📚 语文园地</h1>
+    <div style="width:40px"></div>
+  </div>
+  <div id="app" class="app-wrap"></div>
+  <script src="/assets/app.js?v=12"></script>
+  <script>
+    const CN_NUM = ["", "一", "二", "三", "四", "五", "六", "七", "八"];
+    const unit = parseInt(new URLSearchParams(location.search).get("unit") || "1", 10);
+    let data = null, tab = "exchange";
+
+    if (!App.requireLogin()) { /* redirect */ }
+    else { init(); }
+
+    async function init() {
+      document.getElementById("g-back").href = "lessons.html#u" + unit;
+      document.getElementById("g-title").textContent = `第${CN_NUM[unit] || unit}单元 语文园地`;
+      try { data = await App.call("/api/unit_garden?unit=" + unit); }
+      catch (e) {
+        document.getElementById("app").innerHTML = '<div class="card">加载失败，请稍后重试</div>';
+        return;
+      }
+      render();
+    }
+
+    function render() {
+      const app = document.getElementById("app");
+      const ex = data.exchange || [], wordRows = data.words || [], rec = data.recite || [];
+      app.innerHTML = `
+        <div class="tabs">
+          <button class="tab ${tab === "exchange" ? "active" : ""}" data-t="exchange">交流平台</button>
+          <button class="tab ${tab === "words" ? "active" : ""}" data-t="words">词句段运用</button>
+          <button class="tab ${tab === "recite" ? "active" : ""}" data-t="recite">日积月累</button>
+        </div>
+        <div id="g-body"></div>`;
+      app.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+        tab = b.dataset.t; render(); window.scrollTo({ top: 0 });
+      });
+
+      const body = document.getElementById("g-body");
+      if (tab === "exchange") body.innerHTML = renderExchange(ex);
+      else if (tab === "words") body.innerHTML = renderWords(wordRows);
+      else body.innerHTML = renderRecite(rec);
+
+      body.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => {
+        const el = document.getElementById(b.dataset.toggle);
+        const show = el.style.display === "none";
+        el.style.display = show ? "block" : "none";
+        b.textContent = show ? "收起参考答案" : "看参考答案";
+      });
+    }
+
+    function renderExchange(ex) {
+      if (!ex.length) return '<div class="card muted">本单元暂无交流平台内容</div>';
+      return `<p class="muted" style="margin:0 0 10px;font-size:.85rem">这些是本单元交流平台讲的方法，读完可以在课文里找一找。</p>` +
+        ex.map((x, i) => `
+        <div class="card grammar-card">
+          <div class="muted" style="font-size:.78rem">要点 ${i + 1}</div>
+          <div class="t-cn" style="margin-top:4px;line-height:1.95">${App.escapeHtml(x.body || "")}</div>
+        </div>`).join("");
+    }
+
+    function renderWords(rows) {
+      if (!rows.length) return '<div class="card muted">本单元暂无词句段练习</div>';
+      return `<p class="muted" style="margin:0 0 10px;font-size:.85rem">先自己想一想、说一说，再看参考答案。</p>` +
+        rows.map((w, i) => `
+        <div class="card garden-item">
+          <div class="muted" style="font-size:.78rem">第 ${w.lesson_no} 课 · ${App.escapeHtml(w.lesson_title || "")}</div>
+          <div class="t-cn" style="margin-top:6px;line-height:1.9;${w.options && w.options.length ? "" : "font-weight:600"}">
+            ${i + 1}. ${App.escapeHtml(w.prompt)}
+          </div>
+          ${(w.options || []).length ? `<div style="margin-top:8px;font-size:.9rem;line-height:1.9">${w.options.map(o => `<div>${App.escapeHtml(o)}</div>`).join("")}</div>` : ""}
+          <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+            <button class="btn btn-secondary btn-sm" data-toggle="ans-${w.id}">看参考答案</button>
+            <a class="muted" style="font-size:.85rem" href="lesson.html?lesson=${w.lesson_no}&module=grammar">去本课学习 →</a>
+          </div>
+          <div id="ans-${w.id}" class="garden-ans t-cn" style="display:none">
+            <div><b>参考：</b>${App.escapeHtml(w.answer)}</div>
+            ${w.explanation ? `<div style="margin-top:6px;font-size:.9rem;color:var(--c-text-2)">${App.escapeHtml(w.explanation)}</div>` : ""}
+          </div>
+        </div>`).join("");
+    }
+
+    function quoteAttrib(it) {
+      const author = it.author || "";
+      let source = it.source || "";
+      if (source && !author) return source;
+      if (source && !/^[《“"（(]/.test(source)) source = "《" + source + "》";
+      return [author, source].filter(Boolean).join(" ");
+    }
+
+    function renderRecite(rec) {
+      if (!rec.length) {
+        return `<div class="card"><div class="t-cn" style="line-height:1.9">本单元是习作单元，语文园地没有「日积月累」。学完本单元的写法，可以直接去写习作。</div></div>`;
+      }
+      return rec.map(r => {
+        const ex = r.extra || {};
+        const who = [ex.dynasty, ex.author].filter(Boolean).join(" · ");
+        const notes = ex.notes || [];
+        const items = ex.items || [];
+        const bodyHtml = items.length
+          ? items.map(it => `<div class="garden-quote t-cn">${App.escapeHtml(it.text)}${(it.author || it.source)
+              ? `<span class="who">—— ${App.escapeHtml(quoteAttrib(it))}</span>` : ""}</div>`).join("")
+          : (r.body || "").indexOf("\n") < 0 && (r.body || "").split(/\s+/).length > 3
+            ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${(r.body || "").split(/\s+/).filter(Boolean)
+                .map(w => `<span class="t-cn" style="background:var(--c-primary-bg);border-radius:8px;padding:6px 12px">${App.escapeHtml(w)}</span>`).join("")}</div>`
+            : `<div class="garden-text t-cn">${App.escapeHtml(r.body || "")}</div>`;
+        return `<div class="card grammar-card">
+          <div style="font-weight:700;font-size:1.05rem" class="t-cn">${App.escapeHtml(r.title || "日积月累")}</div>
+          ${who ? `<div class="muted" style="font-size:.85rem;margin-top:2px">${App.escapeHtml(who)}</div>` : ""}
+          <div style="margin-top:10px">${bodyHtml}</div>
+          ${(notes.length || ex.translation) ? `<details style="margin-top:12px">
+            <summary style="cursor:pointer;font-weight:600;color:var(--c-primary-d)">注释与译文</summary>
+            <div style="margin-top:10px">
+              ${notes.map(n => `<div class="garden-note"><b>${App.escapeHtml(n.word || "")}</b><span>${App.escapeHtml(n.note || "")}</span></div>`).join("")}
+              ${ex.translation ? `<div class="explain-box t-cn" style="margin-top:10px;line-height:1.9">${App.escapeHtml(ex.translation)}</div>` : ""}
+            </div>
+          </details>` : ""}
+        </div>`;
+      }).join("");
+    }
+  </script>
+</body>
+</html>

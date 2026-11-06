@@ -982,15 +982,20 @@ def api_lessons(request: Request):
                 "lesson_no": r["lesson_no"], "title": r["title"],
                 "type": r["lesson_type"] or "reading"})
         writings = conn.execute(
-            "SELECT id, unit, title FROM writing_tasks WHERE book=? ORDER BY unit, id",
+            """SELECT id, unit, title,
+                      CASE WHEN COALESCE(guide_json,'')<>'' THEN 1 ELSE 0 END AS has_guide
+               FROM writing_tasks WHERE book=? ORDER BY unit, id""",
             (book,)).fetchall()
         wmap = {}
         for w in writings:
             wmap.setdefault(w["unit"] or 0, []).append(dict(w))
+        garden_units = {r["unit"] for r in conn.execute(
+            "SELECT DISTINCT unit FROM unit_garden WHERE book=?", (book,))}
         return {
             "book": book, "ui_mode": "native",
             "sections": phase_sections(phase, class_id),
-            "units": [{"unit": u, "lessons": ls, "writings": wmap.get(u, [])}
+            "units": [{"unit": u, "lessons": ls, "writings": wmap.get(u, []),
+                       "garden": u in garden_units}
                       for u, ls in sorted(units.items())],
             "lessons": [dict(r) for r in rows],   # 兼容旧前端
         }
@@ -1177,6 +1182,55 @@ def api_unit_quiz(request: Request, lesson: str, count: int = 20):
         i += 1
     rnd.shuffle(picked)
     return {"unit": unit, "count": len(picked), "items": picked}
+
+
+@app.get("/api/unit_garden")
+def api_unit_garden(request: Request, unit: int):
+    """语文园地：交流平台 + 词句段运用（复用本单元练习） + 日积月累。"""
+    student = get_student(parse_token(request))
+    book = student_book(student)
+    conn = content_db()
+    rows = conn.execute(
+        """SELECT section, sort, title, body, extra_json FROM unit_garden
+           WHERE book=? AND unit=? ORDER BY section, sort, id""",
+        (book, unit)).fetchall()
+    exchange, recite = [], []
+    for r in rows:
+        item = {"title": r["title"], "body": r["body"]}
+        if r["section"] == "recite":
+            try:
+                item["extra"] = json.loads(r["extra_json"] or "{}")
+            except (TypeError, ValueError):
+                item["extra"] = {}
+            recite.append(item)
+        else:
+            exchange.append(item)
+
+    words, seen = [], set()
+    for r in conn.execute(
+            """SELECT i.id, i.lesson_no, i.prompt_zh, i.answer, i.options_json,
+                      COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
+                      l.title AS lesson_title
+               FROM items i
+               JOIN lessons l ON l.book=i.book AND l.lesson_no=i.lesson_no
+               WHERE i.book=? AND i.unit=? AND i.module='词句段'
+               ORDER BY CASE WHEN COALESCE(i.scope,'lesson')='unit' THEN 0 ELSE 1 END,
+                        CAST(i.lesson_no AS INTEGER), i.id""", (book, unit)):
+        prompt = (r["prompt_zh"] or "").strip()
+        if not prompt or not (r["answer"] or "").strip() or prompt in seen:
+            continue
+        seen.add(prompt)
+        try:
+            options = json.loads(r["options_json"] or "[]")
+        except (TypeError, ValueError):
+            options = []
+        words.append({"id": r["id"], "lesson_no": r["lesson_no"],
+                      "lesson_title": r["lesson_title"], "prompt": prompt,
+                      "answer": r["answer"], "explanation": r["explanation"] or "",
+                      "options": options})
+        if len(words) >= 12:
+            break
+    return {"unit": unit, "exchange": exchange, "recite": recite, "words": words}
 
 
 class ExamSubmitReq(BaseModel):
@@ -2308,6 +2362,8 @@ def api_writing_task(tid: int, request: Request):
     d = dict(task)
     d["rubric"] = _parse_json(d.get("rubric_json"), [])
     d["tips"] = _parse_json(d.get("tips_json"), [])
+    d["guide"] = _parse_json(d.get("guide_json"), {})
+    d["phrases"] = _parse_json(d.get("phrases_json"), [])
     mine = [dict(r) for r in get_conn().execute(
         """SELECT id, draft_no, word_count, status, ai_scores_json,
                   teacher_scores_json, teacher_comment, submitted_at, created_at

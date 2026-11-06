@@ -66,7 +66,7 @@
         <a class="fit-card" href="#u${u.unit}">
           <div class="fc-top">第${CN_NUM[u.unit] || u.unit}单元</div>
           <div class="fc-title">${App.escapeHtml(UNIT_NAMES[u.unit] || "")}</div>
-          <div class="fc-sub">${u.lessons.length} 课${(u.writings || []).length ? " · 习作" : ""}</div>
+          <div class="fc-sub">${u.lessons.length} 课${u.garden ? " · 园地" : ""}${(u.writings || []).length ? " · 习作" : ""}</div>
         </a>`).join("");
       app.innerHTML = `
         <div class="top-bar">
@@ -86,6 +86,12 @@
         <a class="fit-card" href="lesson.html?lesson=${l.lesson_no}">
           <div class="fc-top">第 ${l.lesson_no} 课${l.type === "skim" ? " · 略读" : ""}</div>
           <div class="fc-title">${App.escapeHtml(l.title)}</div>
+        </a>`);
+      if (u.garden) cards.push(`
+        <a class="fit-card" href="garden.html?unit=${u.unit}">
+          <div class="fc-top">第${CN_NUM[u.unit] || u.unit}单元</div>
+          <div class="fc-title">📚 语文园地</div>
+          <div class="fc-sub">交流平台 · 词句段运用 · 日积月累</div>
         </a>`);
       if ((u.writings || []).length) cards.push(`
         <a class="fit-card" href="writing.html?unit=${u.unit}">

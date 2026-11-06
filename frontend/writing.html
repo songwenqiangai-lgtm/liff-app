@@ -84,6 +84,10 @@
           <div class="muted" style="font-size:.85rem;margin-top:4px">第${t.unit}单元 · 不少于 ${t.min_words || 400} 字</div>
           <div class="t-cn" style="margin-top:12px;line-height:1.9;white-space:pre-wrap">${App.escapeHtml(t.prompt || "")}</div>
           ${t.requirements ? `<div class="explain-box" style="margin-top:10px"><b>写作要求</b><br>${App.escapeHtml(t.requirements)}</div>` : ""}
+          ${renderGuide(t.guide)}
+          ${renderPhrases(t.phrases)}
+          ${t.sample_text ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">范文片段（可参考，不要照抄）</summary>
+            <div class="t-cn" style="margin-top:8px;line-height:1.95;background:#fafafa;border-left:3px solid #c88a3e;padding:10px 12px;border-radius:6px;white-space:pre-wrap">${App.escapeHtml(t.sample_text)}</div></details>` : ""}
           ${(t.tips || []).length ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">写作提示</summary>
             <div style="margin-top:8px;font-size:.88rem;line-height:1.9">${t.tips.map(x => "· " + App.escapeHtml(x)).join("<br>")}</div></details>` : ""}
         </div>
@@ -140,6 +144,31 @@
           document.getElementById("w-result").innerHTML = '<div class="feedback-box error-text" style="margin-top:12px">提交失败，请重试</div>';
         } finally { btn.disabled = false; btn.textContent = "提交让 AI 批改"; }
       };
+    }
+
+    function renderGuide(g) {
+      if (!g || !Object.keys(g).length) return "";
+      const ICON = { "审题": "🔍", "结构提纲": "🧭", "可从课文借鉴": "📖" };
+      const blocks = Object.entries(g).filter(([, v]) => (v || []).length).map(([k, v]) => `
+        <div style="margin-top:10px">
+          <div style="font-weight:600;color:var(--c-primary-d);font-size:.92rem">${ICON[k] || "·"} ${App.escapeHtml(k)}</div>
+          <div class="t-cn" style="margin-top:4px;font-size:.9rem;line-height:1.9">${v.map(x => "· " + App.escapeHtml(x)).join("<br>")}</div>
+        </div>`).join("");
+      if (!blocks) return "";
+      return `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">写法指导</summary>${blocks}</details>`;
+    }
+
+    function renderPhrases(list) {
+      if (!list || !list.length) return "";
+      const blocks = list.map(p => `
+        <div style="margin-top:10px">
+          <div style="font-weight:600;color:var(--c-primary-d);font-size:.92rem">${App.escapeHtml(p["类别"] || "")}</div>
+          <div class="chip-group" style="margin-top:6px">
+            ${(p["词语"] || []).map(w => `<span class="chip" style="cursor:default;font-size:.85rem;padding:5px 12px">${App.escapeHtml(w)}</span>`).join("")}
+          </div>
+          ${p["例句"] ? `<div class="t-cn muted" style="margin-top:6px;font-size:.85rem;line-height:1.8">例：${App.escapeHtml(p["例句"])}</div>` : ""}
+        </div>`).join("");
+      return `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">好词好句</summary>${blocks}</details>`;
     }
 
     function renderFeedback(fb) {
