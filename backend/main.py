@@ -1570,7 +1570,8 @@ def teacher_overview(request: Request):
         open_h = conn.execute("SELECT COUNT(*) c FROM handoff_events WHERE class_id=? AND closed=0", (cid,)).fetchone()["c"]
         classes.append({"class_id": cid, "phase": r["phase"], "ai_enabled": r["ai_enabled"],
                         "teacher_response_allowed": r["teacher_response_allowed"], "n_students": r["n_students"],
-                        "active_7d": active, "weekly_interactions": weekly, "open_handoffs": open_h})
+                        "active_7d": active, "weekly_interactions": weekly, "open_handoffs": open_h,
+                        "native": is_native(cid), "label": CLASS_LABELS.get(cid, cid)})
     return {"classes": classes,
             "open_handoffs_total": conn.execute("SELECT COUNT(*) c FROM handoff_events WHERE closed=0").fetchone()["c"],
             "open_avoidance": conn.execute("SELECT COUNT(*) c FROM avoidance_flags WHERE resolved=0").fetchone()["c"],
@@ -3048,6 +3049,104 @@ def teacher_native_overview(request: Request, class_id: str = "C6/1"):
     return {"class_id": class_id, "students": out,
             "assignments": conn.execute(
                 "SELECT COUNT(*) c FROM assignments WHERE class_id=?", (class_id,)).fetchone()["c"]}
+
+
+# ---------- 班级错题分布 ----------
+
+@app.get("/teacher/errors")
+def teacher_errors(request: Request, class_id: str = "C6/1", student_id: int = 0, limit: int = 30):
+    teacher_guard(request)
+    conn = get_conn()
+    per_student, tags, recent = [], [], []
+    total_open = 0
+    if student_id:
+        who = conn.execute("SELECT display_name, student_no FROM students WHERE id=?", (student_id,)).fetchone()
+        if who:
+            per_student = [{"id": student_id, "display_name": who["display_name"],
+                            "student_no": who["student_no"],
+                            "n": conn.execute(
+                                "SELECT COUNT(*) c FROM error_items WHERE student_id=? AND mastered=0",
+                                (student_id,)).fetchone()["c"],
+                            "wrong": conn.execute(
+                                "SELECT COALESCE(SUM(wrong_count),0) s FROM error_items WHERE student_id=? AND mastered=0",
+                                (student_id,)).fetchone()["s"]}]
+        tags = [dict(r) for r in conn.execute(
+            """SELECT knowledge_tag tag, q_type, SUM(wrong_count) n, 1 students
+               FROM error_items WHERE student_id=? AND mastered=0
+               GROUP BY knowledge_tag, q_type ORDER BY n DESC LIMIT ?""",
+            (student_id, limit)).fetchall()]
+        recent = [dict(r) for r in conn.execute(
+            """SELECT e.last_wrong_at, e.wrong_count, e.q_type, e.knowledge_tag, e.source,
+                      s.display_name FROM error_items e JOIN students s ON s.id=e.student_id
+               WHERE e.student_id=? AND e.mastered=0 ORDER BY e.last_wrong_at DESC LIMIT ?""",
+            (student_id, limit)).fetchall()]
+        total_open = per_student[0]["n"] if per_student else 0
+    else:
+        per_student = [dict(r) for r in conn.execute(
+            """SELECT s.id, s.display_name, s.student_no, COUNT(e.id) n,
+                      COALESCE(SUM(e.wrong_count),0) wrong
+               FROM students s LEFT JOIN error_items e
+                 ON e.student_id=s.id AND e.mastered=0
+               WHERE s.class_id=? GROUP BY s.id ORDER BY wrong DESC, s.student_no""",
+            (class_id,)).fetchall()]
+        total_open = sum(p["n"] or 0 for p in per_student)
+        tags = [dict(r) for r in conn.execute(
+            """SELECT e.knowledge_tag tag, e.q_type, SUM(e.wrong_count) n,
+                      COUNT(DISTINCT e.student_id) students
+               FROM error_items e JOIN students s ON s.id=e.student_id
+               WHERE s.class_id=? AND e.mastered=0
+               GROUP BY e.knowledge_tag, e.q_type ORDER BY n DESC LIMIT ?""",
+            (class_id, limit)).fetchall()]
+        recent = [dict(r) for r in conn.execute(
+            """SELECT e.last_wrong_at, e.wrong_count, e.q_type, e.knowledge_tag, e.source,
+                      s.display_name FROM error_items e JOIN students s ON s.id=e.student_id
+               WHERE s.class_id=? AND e.mastered=0
+               ORDER BY e.last_wrong_at DESC LIMIT ?""",
+            (class_id, limit)).fetchall()]
+    return {"class_id": class_id, "student_id": student_id, "per_student": per_student,
+            "tags": tags, "recent": recent, "total_open": total_open}
+
+
+# ---------- 教材内容地图 ----------
+
+@app.get("/teacher/content_map")
+def teacher_content_map(request: Request, class_id: str = "C6/1"):
+    teacher_guard(request)
+    book = CLASS_CONTENT.get(class_id, "M41")
+    cdb = content_db()
+    units = {}
+    for r in cdb.execute(
+            """SELECT COALESCE(unit,0) u, COUNT(*) n FROM lessons
+               WHERE book=? GROUP BY u ORDER BY u""", (book,)):
+        units[r["u"]] = {"unit": r["u"], "lessons": r["n"], "items": 0,
+                         "exchange": 0, "recite": 0}
+    for r in cdb.execute(
+            """SELECT COALESCE(unit,0) u, COUNT(*) n FROM items
+               WHERE book=? GROUP BY u""", (book,)):
+        units.setdefault(r["u"], {"unit": r["u"], "lessons": 0, "items": 0,
+                                  "exchange": 0, "recite": 0})
+        units[r["u"]]["items"] += r["n"]
+    for r in cdb.execute(
+            "SELECT unit, section, COUNT(*) n FROM unit_garden WHERE book=? GROUP BY unit, section",
+            (book,)):
+        u = units.setdefault(r["unit"], {"unit": r["unit"], "lessons": 0, "items": 0,
+                                         "exchange": 0, "recite": 0})
+        u[r["section"]] = r["n"]
+    writings = {}
+    for r in cdb.execute(
+            """SELECT COALESCE(unit,0) u, title, min_words, guide_json, sample_text FROM writing_tasks
+               WHERE book=? ORDER BY u""", (book,)):
+        writings[r["u"]] = {
+            "title": r["title"], "min_words": r["min_words"],
+            "has_guide": bool(r["guide_json"]), "has_sample": bool(r["sample_text"])}
+    out = []
+    for u in sorted(units):
+        d = units[u]
+        d["writing"] = writings.get(u)
+        out.append(d)
+    return {"class_id": class_id, "book": book, "units": out,
+            "native": is_native(class_id),
+            "assigned": sorted(assigned_lessons(class_id))}
 
 
 # ---------- 静态页面（必须放最后） ----------
