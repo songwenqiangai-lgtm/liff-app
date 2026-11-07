@@ -176,7 +176,7 @@ app = FastAPI(title="Thai-Chinese Tutor LIFF")
 async def html_no_cache(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path == "/" or path.endswith(".html"):
+    if path == "/" or path.endswith(".html") or path.startswith("/teacher/"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
