@@ -93,7 +93,9 @@
     /* ===== 模块内容页（点击卡片进入） ===== */
     function renderModule(key) {
       const app = document.getElementById("app");
-      const title = DATA.text ? DATA.text.title : ("บทที่ " + LESSON);
+      const title = key === "unit_quiz"
+        ? (DATA.unit ? `第 ${DATA.unit} 单元${DATA.unit_name ? " · " + DATA.unit_name : ""}` : "本单元")
+        : (DATA.text ? DATA.text.title : ("บทที่ " + LESSON));
       const labels = { vocab: ["📖", "单词"], text: ["📄", "课文"], grammar: ["✏️", "语法"],
         exercise: ["🏋️", "练习"], pronounce: ["🗣️", "发音"], exam: ["📝", "考试"],
         unit_quiz: ["🧪", "单元测验"] };
