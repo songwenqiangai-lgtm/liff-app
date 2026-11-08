@@ -95,7 +95,8 @@
       const app = document.getElementById("app");
       const title = DATA.text ? DATA.text.title : ("บทที่ " + LESSON);
       const labels = { vocab: ["📖", "单词"], text: ["📄", "课文"], grammar: ["✏️", "语法"],
-        exercise: ["🏋️", "练习"], pronounce: ["🗣️", "发音"], exam: ["📝", "考试"] };
+        exercise: ["🏋️", "练习"], pronounce: ["🗣️", "发音"], exam: ["📝", "考试"],
+        unit_quiz: ["🧪", "单元测验"] };
       const [icon, zh] = labels[key] || ["", ""];
       app.innerHTML = `
         <div class="top-bar">
@@ -113,6 +114,7 @@
       else if (key === "exercise") renderExercise(el);
       else if (key === "pronounce") renderPronounce(el);
       else if (key === "exam") renderExam(el);
+      else if (key === "unit_quiz") renderUnitQuizZh(el);
       window.scrollTo({ top: 0 });
     }
 
@@ -715,13 +717,15 @@
       App.call("/api/unit_quiz?lesson=" + LESSON).then(data => {
         const qs = data.items || [];
         if (!qs.length) {
-          el.innerHTML = '<div class="card muted" style="text-align:center">本单元暂无补充测验</div>';
+          el.innerHTML = '<div class="card muted" style="text-align:center">本单元暂无测验题</div>';
           return;
         }
         el.innerHTML = `
           <div class="card" style="background:var(--c-primary-l);border:none">
             <b class="t-cn">第 ${data.unit} 单元 · 单元测验</b>
-            <p class="muted" style="font-size:.82rem;margin-top:4px">从本单元各课练习题中抽取 ${qs.length} 题，做完一起看答案和解析。</p>
+            <p class="muted" style="font-size:.82rem;margin-top:4px">${data.mode === "l2"
+              ? `从本单元各课随堂测中抽取 ${qs.length} 题，做完一起看答案和解析。`
+              : `从本单元各课练习题中抽取 ${qs.length} 题，做完一起看答案和解析。`}</p>
           </div>
           <div class="exercise-header" style="margin-top:12px">
             <span class="muted t-mono">${qs.length} 题</span>

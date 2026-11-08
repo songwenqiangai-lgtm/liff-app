@@ -655,11 +655,12 @@
         el.innerHTML = `<h1>📚 课程与内容</h1><div class="card">加载失败：${esc(e.message)}</div>`;
         return;
       }
-      const nativeCols = cm.native ? 2 : 0;
+      const hasExtras = cm.units.some(u => u.exchange || u.recite || u.writing);
+      const hasUnits = cm.units.some(u => u.unit > 0);
       const unitRows = cm.units.map(u => `
         <tr>
-          <td><b>${u.unit ? `第${u.unit}单元` : "不分单元（按课）"}</b></td><td>${u.lessons} 课</td><td>${u.items} 题</td>
-          ${cm.native ? `<td>${u.exchange ? u.exchange + " 条" : "—"} / ${u.recite ? u.recite + " 条" : "—"}</td>
+          <td><b>${u.unit ? `第${u.unit}单元` : "不分单元（按课）"}${u.name ? `<br><span class="muted" style="font-weight:400">${esc(u.name)}</span>` : ""}</b></td><td>${u.lessons} 课</td><td>${u.items} 题</td>
+          ${hasExtras ? `<td>${u.exchange ? u.exchange + " 条" : "—"} / ${u.recite ? u.recite + " 条" : "—"}</td>
           <td class="wrap">${u.writing ? `《${esc(u.writing.title)}》 · ${u.writing.min_words} 字以上${u.writing.has_guide ? " · 有写法指导" : ""}` : "—"}</td>` : ""}
         </tr>`).join("");
       const openText = cm.native
@@ -669,13 +670,15 @@
         <div class="row" style="justify-content:space-between">
           <h1>📚 课程与内容</h1>${classPicker()}
         </div>
-        <p class="muted">${esc(classLabel(CLASS))} · 教材 ${esc(cm.book)} · ${esc(openText)}</p>
+        <p class="muted">${esc(classLabel(CLASS))} · 教材 ${esc(cm.book_title || cm.book)} · ${esc(openText)}</p>
         <div class="card"><h2>教材内容一览</h2>
-          <table><tr><th>单元</th><th>课文</th><th>练习题</th>${cm.native ? "<th>语文园地（交流平台 / 日积月累）</th><th>习作</th>" : ""}</tr>
-          ${unitRows || `<tr><td colspan=${3 + nativeCols}>该教材没有内容数据</td></tr>`}</table>
+          <table><tr><th>单元</th><th>课文</th><th>练习题</th>${hasExtras ? `<th>${cm.native ? "语文园地（交流平台 / 日积月累）" : "单元复习（词汇句型 / 文化小知识）"}</th><th>${cm.native ? "习作" : "写作"}</th>` : ""}</tr>
+          ${unitRows || `<tr><td colspan=${3 + (hasExtras ? 2 : 0)}>该教材没有内容数据</td></tr>`}</table>
           <p class="muted" style="margin-top:8px">学生端路径：${cm.native
             ? "单元页 → 课文 → 语文园地（交流平台 / 词句段运用 / 日积月累）→ 习作（写法指导 / 好词好句 / 范文片段）→ 单元测验"
-            : "课程列表 → 课文（生词 / 课文 / 语法 / 练习 / 测验）→ 作业"}</p>
+            : (hasUnits
+              ? "单元页 → 课文（生词 / 课文 / 语法 / 练习 / 测验）→ 单元复习（词汇与句型 / 单元练习 / 文化小知识）→ 写作（写法指导 / 好词好句 / 范文）→ 单元测验"
+              : "课程列表 → 课文（生词 / 课文 / 语法 / 练习 / 测验）→ 作业")}</p>
         </div>
         ${cm.native ? `<div class="help-box">中文班是常规教学，全部课文和单元内容默认开放给学生，不需要逐课分配。下面的「开放给学生的课文」只用于 L2 研究班。</div>` : `<div class="card"><h2>开放给学生的课文</h2>
           <p class="muted">勾选后该班学生才能看到对应课程。保存会整体替换该班分配。</p>

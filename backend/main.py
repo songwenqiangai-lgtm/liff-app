@@ -96,6 +96,44 @@ def assigned_lessons(class_id: str) -> set:
     return {r["lesson_no"] for r in rows}
 
 
+def book_title(book: str) -> str:
+    row = content_db().execute(
+        "SELECT title FROM books WHERE book=?", (book,)).fetchone()
+    return row["title"] if row else book
+
+
+def unit_names(book: str) -> dict:
+    rows = content_db().execute(
+        "SELECT unit, name FROM units WHERE book=?", (book,)).fetchall()
+    return {r["unit"]: r["name"] for r in rows}
+
+
+def _l2_unit_assigned(student, unit) -> bool:
+    """L2 班：该单元是否至少有一课被教师分配"""
+    if is_native(student["class_id"]):
+        return True
+    if unit in (None, 0):
+        return False
+    book = student_book(student)
+    assigned = assigned_lessons(student["class_id"])
+    rows = content_db().execute(
+        "SELECT lesson_no FROM lessons WHERE book=? AND unit=?", (book, unit)).fetchall()
+    return any(r["lesson_no"] in assigned for r in rows)
+
+
+def _allow_writing(student, task=None, write: bool = False):
+    """母语班不限；L2 班只能看/写本班教材、已分配单元的写作任务。"""
+    if is_native(student["class_id"]):
+        return
+    if task is not None:
+        if task["book"] != student_book(student):
+            raise HTTPException(403, "task not for this class")
+        if not _l2_unit_assigned(student, task["unit"]):
+            raise HTTPException(403, "unit not assigned")
+    if write and current_phase(student["class_id"]) not in INTERACTIVE_PHASES:
+        raise HTTPException(403, "writing not available in current phase")
+
+
 def phase_sections(phase: str, class_id: str = "") -> dict:
     # 中文班是常规教学：所有模块始终开放，不受研究阶段控制
     if class_id and is_native(class_id):
@@ -980,46 +1018,58 @@ def api_lessons(request: Request):
     conn = content_db()
     assigned = assigned_lessons(class_id)
 
-    if is_native(class_id):
+    native = is_native(class_id)
+
+    if native:
         # 中文班：常规教学，全部课次可见；按单元分组返回
         rows = conn.execute(
             """SELECT lesson_no, title, unit, lesson_type FROM lessons
                WHERE book=? ORDER BY CAST(lesson_no AS INTEGER)""", (book,)).fetchall()
+    elif assigned:
+        ph = ",".join("?" * len(assigned))
+        rows = conn.execute(
+            f"""SELECT lesson_no, title, unit, lesson_type FROM lessons
+                WHERE book=? AND lesson_no IN ({ph})
+                ORDER BY CAST(lesson_no AS INTEGER)""",
+            (book, *sorted(assigned, key=int)),
+        ).fetchall()
+    else:
+        rows = []  # 教师未分配 → 学生看不到任何课
+
+    names = unit_names(book)
+    has_units = any((r["unit"] or 0) > 0 for r in rows)
+    writings = conn.execute(
+        """SELECT id, unit, title,
+                  CASE WHEN COALESCE(guide_json,'')<>'' THEN 1 ELSE 0 END AS has_guide
+           FROM writing_tasks WHERE book=? ORDER BY unit, id""",
+        (book,)).fetchall()
+    wmap = {}
+    for w in writings:
+        wmap.setdefault(w["unit"] or 0, []).append(dict(w))
+    garden_units = {r["unit"] for r in conn.execute(
+        "SELECT DISTINCT unit FROM unit_garden WHERE book=?", (book,))}
+
+    payload = {
+        "book": book, "book_title": book_title(book),
+        "ui_mode": "native" if native else "l2",
+        "sections": phase_sections(phase, class_id if native else ""),
+        "lessons": [dict(r) for r in rows],   # 兼容旧前端
+    }
+    if native or has_units:
         units = {}
         for r in rows:
             u = r["unit"] or 0
             units.setdefault(u, []).append({
                 "lesson_no": r["lesson_no"], "title": r["title"],
                 "type": r["lesson_type"] or "reading"})
-        writings = conn.execute(
-            """SELECT id, unit, title,
-                      CASE WHEN COALESCE(guide_json,'')<>'' THEN 1 ELSE 0 END AS has_guide
-               FROM writing_tasks WHERE book=? ORDER BY unit, id""",
-            (book,)).fetchall()
-        wmap = {}
-        for w in writings:
-            wmap.setdefault(w["unit"] or 0, []).append(dict(w))
-        garden_units = {r["unit"] for r in conn.execute(
-            "SELECT DISTINCT unit FROM unit_garden WHERE book=?", (book,))}
-        return {
-            "book": book, "ui_mode": "native",
-            "sections": phase_sections(phase, class_id),
-            "units": [{"unit": u, "lessons": ls, "writings": wmap.get(u, []),
-                       "garden": u in garden_units}
-                      for u, ls in sorted(units.items())],
-            "lessons": [dict(r) for r in rows],   # 兼容旧前端
-        }
-
-    if assigned:
-        ph = ",".join("?" * len(assigned))
-        lessons = conn.execute(
-            f"SELECT lesson_no, title FROM lessons WHERE book=? AND lesson_no IN ({ph}) ORDER BY CAST(lesson_no AS INTEGER)",
-            (book, *sorted(assigned, key=int)),
-        ).fetchall()
-    else:
-        lessons = []  # 教师未分配 → 学生看不到任何课
-    return {"book": book, "ui_mode": "l2", "sections": phase_sections(phase),
-            "lessons": [dict(r) for r in lessons]}
+        payload["units"] = [{
+            "unit": u,
+            "name": names.get(u) or ("其他课文" if not u else f"第{u}单元"),
+            "lessons": ls,
+            "writings": wmap.get(u, []),
+            "garden": u in garden_units,
+        } for u, ls in sorted(units.items())]
+    return payload
 
 
 @app.get("/api/lesson")
@@ -1136,8 +1186,15 @@ def api_lesson(request: Request, lesson: str):
            FROM exams e LEFT JOIN passages p ON p.id = e.passage_id
            WHERE e.book=? AND e.lesson_no=? ORDER BY e.id""",
         (book, lesson)).fetchall()]
+    lrow = conn.execute(
+        "SELECT unit FROM lessons WHERE book=? AND lesson_no=?", (book, lesson)).fetchone()
+    unit = lrow["unit"] if lrow else None
     return {
         "lesson_no": lesson, "book": book, "sections": phase_sections(phase),
+        "unit": unit, "unit_name": unit_names(book).get(unit, ""),
+        "garden": bool(unit) and conn.execute(
+            "SELECT 1 FROM unit_garden WHERE book=? AND unit=? LIMIT 1",
+            (book, unit)).fetchone() is not None,
         "vocab": vocab, "text": text, "grammar": grammar,
         "exercises": exercises, "exam": exam,
     }
@@ -1154,8 +1211,49 @@ def api_unit_quiz(request: Request, lesson: str, count: int = 20):
     if not row:
         raise HTTPException(404, "lesson not found")
     unit = row["unit"]
-    rows = conn.execute(
-        """SELECT i.id, i.lesson_no, i.module, i.prompt_zh, i.answer, i.q_type,
+    if not is_native(student["class_id"]):
+        # L2 教材的单元测验用每课的随堂选择题（中文题干 + 泰语解析），
+        # 练习题本身多是手写填空，不适合做统一小测。
+        assigned = assigned_lessons(student["class_id"])
+        if not assigned:
+            return {"unit": unit, "count": 0, "items": []}
+        ph = ",".join("?" * len(assigned))
+        exams = conn.execute(
+            f"""SELECT e.id, e.lesson_no, e.question_zh, e.option_a, e.option_b,
+                       e.option_c, e.option_d, e.correct, e.explanation_th,
+                       l.title AS lesson_title,
+                       p.title AS passage_title, p.body AS passage_body
+                FROM exams e
+                JOIN lessons l ON l.book=e.book AND l.lesson_no=e.lesson_no
+                LEFT JOIN passages p ON p.id=e.passage_id
+                WHERE e.book=? AND l.unit=? AND e.lesson_no IN ({ph})
+                ORDER BY CAST(e.lesson_no AS INTEGER), e.id""",
+            (book, unit, *sorted(assigned, key=int))).fetchall()
+        picked = []
+        for r in exams:
+            letter = (r["correct"] or "").strip().upper()
+            if letter not in "ABCD":
+                continue
+            opts = [r["option_a"], r["option_b"], r["option_c"], r["option_d"]]
+            text = opts["ABCD".index(letter)] or ""
+            picked.append({
+                "id": f"e{r['id']}", "lesson_no": r["lesson_no"], "module": "exam",
+                "prompt_zh": r["question_zh"],
+                "answer": f"{letter}. {text}",
+                "q_type": "随堂测",
+                "options": [o for o in opts if o],
+                "lesson_title": r["lesson_title"],
+                "passage_title": r["passage_title"], "passage_body": r["passage_body"],
+                "explanation": r["explanation_th"] or "",
+            })
+        rnd = random.Random(f"{book}:{unit}")
+        rnd.shuffle(picked)
+        picked = picked[:count]
+        rnd.shuffle(picked)
+        return {"unit": unit, "count": len(picked), "items": picked, "mode": "l2"}
+
+    assigned = None if is_native(student["class_id"]) else assigned_lessons(student["class_id"])
+    sql = """SELECT i.id, i.lesson_no, i.module, i.prompt_zh, i.answer, i.q_type,
                   i.options_json, i.passage_id,
                   COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
                   l.title AS lesson_title,
@@ -1163,9 +1261,16 @@ def api_unit_quiz(request: Request, lesson: str, count: int = 20):
            FROM items i
            JOIN lessons l ON l.book=i.book AND l.lesson_no=i.lesson_no
            LEFT JOIN passages p ON p.id=i.passage_id
-           WHERE i.book=? AND i.unit IS ? AND COALESCE(i.scope,'lesson')='lesson'
-           ORDER BY CAST(i.lesson_no AS INTEGER), i.id""",
-        (book, unit)).fetchall()
+           WHERE i.book=? AND i.unit IS ? AND COALESCE(i.scope,'lesson')='lesson'"""
+    args = [book, unit]
+    if assigned is not None:
+        if not assigned:
+            return {"unit": unit, "count": 0, "items": []}
+        ph = ",".join("?" * len(assigned))
+        sql += f" AND i.lesson_no IN ({ph})"
+        args += sorted(assigned, key=int)
+    sql += " ORDER BY CAST(i.lesson_no AS INTEGER), i.id"
+    rows = conn.execute(sql, args).fetchall()
 
     by_lesson, seen = {}, set()
     for r in rows:
@@ -1194,15 +1299,22 @@ def api_unit_quiz(request: Request, lesson: str, count: int = 20):
             picked.append(by_lesson[k].pop(0))
         i += 1
     rnd.shuffle(picked)
-    return {"unit": unit, "count": len(picked), "items": picked}
+    return {"unit": unit, "count": len(picked), "items": picked, "mode": "native"}
 
 
 @app.get("/api/unit_garden")
 def api_unit_garden(request: Request, unit: int):
-    """语文园地：交流平台 + 词句段运用（复用本单元练习） + 日积月累。"""
+    """单元复习页：母语班是「语文园地」，L2 班是「单元复习」。"""
     student = get_student(parse_token(request))
+    native = is_native(student["class_id"])
     book = student_book(student)
     conn = content_db()
+    if native:
+        labels = {"page": "语文园地", "exchange": "交流平台",
+                  "words": "词句段运用", "recite": "日积月累"}
+    else:
+        labels = {"page": "单元复习", "exchange": "词汇与句型",
+                  "words": "单元练习", "recite": "文化小知识"}
     rows = conn.execute(
         """SELECT section, sort, title, body, extra_json FROM unit_garden
            WHERE book=? AND unit=? ORDER BY section, sort, id""",
@@ -1219,16 +1331,32 @@ def api_unit_garden(request: Request, unit: int):
         else:
             exchange.append(item)
 
-    words, seen = [], set()
-    for r in conn.execute(
-            """SELECT i.id, i.lesson_no, i.prompt_zh, i.answer, i.options_json,
-                      COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
-                      l.title AS lesson_title
-               FROM items i
-               JOIN lessons l ON l.book=i.book AND l.lesson_no=i.lesson_no
-               WHERE i.book=? AND i.unit=? AND i.module='词句段'
-               ORDER BY CASE WHEN COALESCE(i.scope,'lesson')='unit' THEN 0 ELSE 1 END,
-                        CAST(i.lesson_no AS INTEGER), i.id""", (book, unit)):
+    modules = ("词句段",) if native else ("pattern", "vocab", "chat")
+    mph = ",".join("?" * len(modules))
+    assigned = None if native else assigned_lessons(student["class_id"])
+    sql = f"""SELECT i.id, i.lesson_no, i.prompt_zh, i.answer, i.options_json,
+                     COALESCE(i.explanation_zh, i.explanation_th) AS explanation,
+                     l.title AS lesson_title
+              FROM items i
+              JOIN lessons l ON l.book=i.book AND l.lesson_no=i.lesson_no
+              WHERE i.book=? AND i.unit=? AND i.module IN ({mph})"""
+    args = [book, unit, *modules]
+    if assigned is not None:
+        if not assigned:
+            args = None
+        else:
+            aph = ",".join("?" * len(assigned))
+            sql += f" AND i.lesson_no IN ({aph})"
+            args += sorted(assigned, key=int)
+    if args is not None:
+        sql += """
+              ORDER BY CASE WHEN COALESCE(i.scope,'lesson')='unit' THEN 0 ELSE 1 END,
+                       CAST(i.lesson_no AS INTEGER), i.id"""
+        word_rows = conn.execute(sql, args).fetchall()
+    else:
+        word_rows = []
+    buckets, seen = {}, set()
+    for r in word_rows:
         prompt = (r["prompt_zh"] or "").strip()
         if not prompt or not (r["answer"] or "").strip() or prompt in seen:
             continue
@@ -1237,13 +1365,23 @@ def api_unit_garden(request: Request, unit: int):
             options = json.loads(r["options_json"] or "[]")
         except (TypeError, ValueError):
             options = []
-        words.append({"id": r["id"], "lesson_no": r["lesson_no"],
-                      "lesson_title": r["lesson_title"], "prompt": prompt,
-                      "answer": r["answer"], "explanation": r["explanation"] or "",
-                      "options": options})
-        if len(words) >= 12:
-            break
-    return {"unit": unit, "exchange": exchange, "recite": recite, "words": words}
+        buckets.setdefault(str(r["lesson_no"]), []).append(
+            {"id": r["id"], "lesson_no": r["lesson_no"],
+             "lesson_title": r["lesson_title"], "prompt": prompt,
+             "answer": r["answer"], "explanation": r["explanation"] or "",
+             "options": options})
+    words = []
+    while len(words) < 12 and any(buckets.values()):
+        for key in list(buckets):
+            if len(words) >= 12:
+                break
+            if buckets[key]:
+                words.append(buckets[key].pop(0))
+                if not buckets[key]:
+                    del buckets[key]
+    return {"unit": unit, "unit_name": unit_names(book).get(unit, ""),
+            "mode": "native" if native else "l2", "labels": labels,
+            "exchange": exchange, "recite": recite, "words": words}
 
 
 class ExamSubmitReq(BaseModel):
@@ -2354,7 +2492,6 @@ def api_recitation_submit(req: RecitationReq, request: Request):
 @app.get("/api/writing/tasks")
 def api_writing_tasks(request: Request, unit: int = 0):
     student = get_student(parse_token(request))
-    _need_native(student)
     book = student_book(student)
     sql = "SELECT * FROM writing_tasks WHERE book=?"
     args = [book]
@@ -2362,17 +2499,20 @@ def api_writing_tasks(request: Request, unit: int = 0):
         sql += " AND unit=?"; args.append(unit)
     sql += " ORDER BY unit, id"
     rows = content_db().execute(sql, args).fetchall()
-    return {"tasks": [dict(r) for r in rows]}
+    tasks = [dict(r) for r in rows]
+    if not is_native(student["class_id"]):
+        tasks = [t for t in tasks if _l2_unit_assigned(student, t["unit"])]
+    return {"tasks": tasks}
 
 
 @app.get("/api/writing/task/{tid}")
 def api_writing_task(tid: int, request: Request):
     student = get_student(parse_token(request))
-    _need_native(student)
     task = content_db().execute(
         "SELECT * FROM writing_tasks WHERE id=?", (tid,)).fetchone()
     if not task:
         raise HTTPException(404, "task not found")
+    _allow_writing(student, task)
     d = dict(task)
     d["rubric"] = _parse_json(d.get("rubric_json"), [])
     d["tips"] = _parse_json(d.get("tips_json"), [])
@@ -2383,7 +2523,8 @@ def api_writing_task(tid: int, request: Request):
                   teacher_scores_json, teacher_comment, submitted_at, created_at
            FROM writing_submissions WHERE student_id=? AND task_id=?
            ORDER BY draft_no""", (student["id"], tid)).fetchall()]
-    return {"task": d, "mine": mine}
+    return {"task": d, "mine": mine,
+            "ui_mode": "native" if is_native(student["class_id"]) else "l2"}
 
 
 class WritingSaveReq(BaseModel):
@@ -2397,7 +2538,11 @@ class WritingSaveReq(BaseModel):
 @app.post("/api/writing/save")
 def api_writing_save(req: WritingSaveReq, request: Request):
     student = get_student(parse_token(request))
-    _need_native(student)
+    task = content_db().execute(
+        "SELECT * FROM writing_tasks WHERE id=?", (req.task_id,)).fetchone()
+    if not task:
+        raise HTTPException(404, "task not found")
+    _allow_writing(student, task, write=True)
     wc = len(_norm_text(req.content))
     conn = get_conn()
     row = conn.execute(
@@ -2433,11 +2578,11 @@ class WritingSubmitReq(BaseModel):
 @app.post("/api/writing/submit")
 async def api_writing_submit(req: WritingSubmitReq, request: Request):
     student = get_student(parse_token(request))
-    _need_native(student)
     task = content_db().execute(
         "SELECT * FROM writing_tasks WHERE id=?", (req.task_id,)).fetchone()
     if not task:
         raise HTTPException(404, "task not found")
+    _allow_writing(student, task, write=True)
     wc = len(_norm_text(req.content))
     if wc < 50:
         raise HTTPException(400, "作文太短了，再写一些吧")
@@ -2487,7 +2632,6 @@ async def api_writing_submit(req: WritingSubmitReq, request: Request):
 @app.get("/api/writing/mine")
 def api_writing_mine(request: Request):
     student = get_student(parse_token(request))
-    _need_native(student)
     rows = get_conn().execute(
         """SELECT * FROM writing_submissions WHERE student_id=?
            ORDER BY created_at DESC LIMIT 50""",
@@ -3140,12 +3284,14 @@ def teacher_content_map(request: Request, class_id: str = "C6/1"):
             "title": r["title"], "min_words": r["min_words"],
             "has_guide": bool(r["guide_json"]), "has_sample": bool(r["sample_text"])}
     out = []
+    names = unit_names(book)
     for u in sorted(units):
         d = units[u]
+        d["name"] = names.get(u, "")
         d["writing"] = writings.get(u)
         out.append(d)
-    return {"class_id": class_id, "book": book, "units": out,
-            "native": is_native(class_id),
+    return {"class_id": class_id, "book": book, "book_title": book_title(book),
+            "units": out, "native": is_native(class_id),
             "assigned": sorted(assigned_lessons(class_id))}
 
 

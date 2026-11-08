@@ -33,16 +33,18 @@
 
     async function loadList() {
       const app = document.getElementById("app");
-      let units = [];
-      try { units = (await App.call("/api/lessons")).units || []; }
+      let data = { units: [] };
+      try { data = await App.call("/api/lessons"); }
       catch (e) { app.innerHTML = '<div class="card">加载失败</div>'; return; }
-      if (!units.length) { app.innerHTML = '<div class="card" style="text-align:center">还没有习作任务</div>'; return; }
-      app.innerHTML = `<p class="muted" style="padding:0 var(--s-4) 8px;font-size:.85rem">每单元一次习作，点进单元看本次题目和本单元的课文。</p>` +
+      const units = data.units || [];
+      if (data.ui_mode !== "native") document.querySelector(".top-bar h1").textContent = "✍️ 写作";
+      if (!units.length) { app.innerHTML = '<div class="card" style="text-align:center">还没有写作任务</div>'; return; }
+      app.innerHTML = `<p class="muted" style="padding:0 var(--s-4) 8px;font-size:.85rem">每单元一次写作，点进单元看本次题目和本单元的课文。</p>` +
         units.map(u => {
           const w = (u.writings || [])[0];
           return `<a class="task-row" href="writing.html?unit=${u.unit}">
-            <div class="muted" style="font-size:.78rem">第${u.unit}单元 · ${(u.lessons || []).length} 课</div>
-            <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(w ? w.title : "本次暂无习作")}</div>
+            <div class="muted" style="font-size:.78rem">第${u.unit}单元${u.name ? " · " + App.escapeHtml(u.name) : ""} · ${(u.lessons || []).length} 课</div>
+            <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(w ? w.title : "本次暂无写作任务")}</div>
             <div class="muted" style="font-size:.82rem;margin-top:4px">${(u.lessons || []).map(l => App.escapeHtml(l.title)).join(" · ")}</div>
           </a>`;
         }).join("");
@@ -50,14 +52,16 @@
 
     async function loadUnit(u) {
       const app = document.getElementById("app");
-      let unit = null;
-      try { unit = ((await App.call("/api/lessons")).units || []).find(x => String(x.unit) === String(u)); }
+      let data = { units: [] }, unit = null;
+      try { data = await App.call("/api/lessons"); unit = (data.units || []).find(x => String(x.unit) === String(u)); }
       catch (e) { app.innerHTML = '<div class="card">加载失败</div>'; return; }
+      if (data.ui_mode !== "native") document.querySelector(".top-bar h1").textContent = "✍️ 写作";
       if (!unit) { app.innerHTML = '<div class="card">没有这个单元</div>'; return; }
+      const label = data.ui_mode === "native" ? "习作" : "写作";
       app.innerHTML = `<a class="back" style="display:inline-block;padding:0 var(--s-4) 10px" href="writing.html">← 全部单元</a>` +
         (unit.writings || []).map(w => `
           <a class="task-row" href="writing.html?task_id=${w.id}">
-            <div class="muted" style="font-size:.78rem">第${unit.unit}单元 · 本次习作</div>
+            <div class="muted" style="font-size:.78rem">第${unit.unit}单元${unit.name ? " · " + App.escapeHtml(unit.name) : ""} · 本次${label}</div>
             <div style="font-weight:700;font-size:1.08rem;margin-top:2px" class="t-cn">${App.escapeHtml(w.title)}</div>
             <div class="muted" style="font-size:.82rem;margin-top:4px">点进去开始写 →</div>
           </a>`).join("") +
@@ -75,6 +79,9 @@
       try { data = await App.call("/api/writing/task/" + tid); }
       catch (e) { app.innerHTML = '<div class="card">任务加载失败</div>'; return; }
       const t = data.task;
+      document.querySelector(".top-bar h1").textContent =
+        data.ui_mode === "native" ? "✍️ 习作" : "✍️ 写作";
+      document.title = t.title + " · 写作";
       const mine = data.mine || [];
       const latest = mine.filter(x => x.draft_no === 1).slice(-1)[0];
       const draftText = latest && latest.status === "draft" ? "" : "";

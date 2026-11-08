@@ -35,23 +35,27 @@
 
     async function init() {
       document.getElementById("g-back").href = "lessons.html#u" + unit;
-      document.getElementById("g-title").textContent = `第${CN_NUM[unit] || unit}单元 语文园地`;
       try { data = await App.call("/api/unit_garden?unit=" + unit); }
       catch (e) {
         document.getElementById("app").innerHTML = '<div class="card">加载失败，请稍后重试</div>';
         return;
       }
+      const labels = data.labels || { page: "语文园地", exchange: "交流平台", words: "词句段运用", recite: "日积月累" };
+      const name = data.unit_name ? " · " + data.unit_name : "";
+      document.getElementById("g-title").textContent = `第${CN_NUM[unit] || unit}单元 ${labels.page}${name}`;
+      document.title = `第${CN_NUM[unit] || unit}单元 ${labels.page}${name}`;
       render();
     }
 
     function render() {
       const app = document.getElementById("app");
+      const labels = data.labels || { page: "语文园地", exchange: "交流平台", words: "词句段运用", recite: "日积月累" };
       const ex = data.exchange || [], wordRows = data.words || [], rec = data.recite || [];
       app.innerHTML = `
         <div class="tabs">
-          <button class="tab ${tab === "exchange" ? "active" : ""}" data-t="exchange">交流平台</button>
-          <button class="tab ${tab === "words" ? "active" : ""}" data-t="words">词句段运用</button>
-          <button class="tab ${tab === "recite" ? "active" : ""}" data-t="recite">日积月累</button>
+          <button class="tab ${tab === "exchange" ? "active" : ""}" data-t="exchange">${labels.exchange}</button>
+          <button class="tab ${tab === "words" ? "active" : ""}" data-t="words">${labels.words}</button>
+          <button class="tab ${tab === "recite" ? "active" : ""}" data-t="recite">${labels.recite}</button>
         </div>
         <div id="g-body"></div>`;
       app.querySelectorAll(".tab").forEach(b => b.onclick = () => {
@@ -72,17 +76,20 @@
     }
 
     function renderExchange(ex) {
-      if (!ex.length) return '<div class="card muted">本单元暂无交流平台内容</div>';
-      return `<p class="muted" style="margin:0 0 10px;font-size:.85rem">这些是本单元交流平台讲的方法，读完可以在课文里找一找。</p>` +
+      if (!ex.length) return '<div class="card muted">本单元暂无复习要点</div>';
+      const native = (data.labels || {}).exchange === "交流平台";
+      return `<p class="muted" style="margin:0 0 10px;font-size:.85rem">${native
+        ? "这些是本单元交流平台讲的方法，读完可以在课文里找一找。"
+        : "先读一读本单元的词汇、句型和表达要点，再去做「单元练习」。"}</p>` +
         ex.map((x, i) => `
         <div class="card grammar-card">
-          <div class="muted" style="font-size:.78rem">要点 ${i + 1}</div>
+          ${x.title ? `<div style="font-weight:700" class="t-cn">${App.escapeHtml(x.title)}</div>` : `<div class="muted" style="font-size:.78rem">要点 ${i + 1}</div>`}
           <div class="t-cn" style="margin-top:4px;line-height:1.95">${App.escapeHtml(x.body || "")}</div>
         </div>`).join("");
     }
 
     function renderWords(rows) {
-      if (!rows.length) return '<div class="card muted">本单元暂无词句段练习</div>';
+      if (!rows.length) return '<div class="card muted">本单元暂无配套练习</div>';
       return `<p class="muted" style="margin:0 0 10px;font-size:.85rem">先自己想一想、说一说，再看参考答案。</p>` +
         rows.map((w, i) => `
         <div class="card garden-item">
@@ -112,7 +119,10 @@
 
     function renderRecite(rec) {
       if (!rec.length) {
-        return `<div class="card"><div class="t-cn" style="line-height:1.9">本单元是习作单元，语文园地没有「日积月累」。学完本单元的写法，可以直接去写习作。</div></div>`;
+        const native = (data.labels || {}).exchange === "交流平台";
+        return `<div class="card"><div class="t-cn" style="line-height:1.9">${native
+          ? "本单元是习作单元，语文园地没有「日积月累」。学完本单元的写法，可以直接去写习作。"
+          : "本单元暂无文化小知识。"}</div></div>`;
       }
       return rec.map(r => {
         const ex = r.extra || {};

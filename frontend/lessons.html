@@ -50,8 +50,8 @@
       app.className = "fit-screen";
       const draw = () => {
         const m = location.hash.match(/^#u(\d+)$/);
-        if (m) renderUnitDetail(app, units, parseInt(m[1], 10));
-        else renderUnitList(app, units);
+        if (m) renderUnitDetail(app, units, parseInt(m[1], 10), data);
+        else renderUnitList(app, units, data);
         window.scrollTo({ top: 0 });
       };
       if (!window.__unitHashHooked) {
@@ -61,17 +61,18 @@
       draw();
     }
 
-    function renderUnitList(app, units) {
+    function renderUnitList(app, units, data) {
+      const native = data.ui_mode === "native";
       const cards = units.map(u => `
         <a class="fit-card" href="#u${u.unit}">
           <div class="fc-top">第${CN_NUM[u.unit] || u.unit}单元</div>
-          <div class="fc-title">${App.escapeHtml(UNIT_NAMES[u.unit] || "")}</div>
-          <div class="fc-sub">${u.lessons.length} 课${u.garden ? " · 园地" : ""}${(u.writings || []).length ? " · 习作" : ""}</div>
+          <div class="fc-title">${App.escapeHtml(u.name || UNIT_NAMES[u.unit] || "")}</div>
+          <div class="fc-sub">${u.lessons.length} 课${u.garden ? (native ? " · 园地" : " · 单元复习") : ""}${(u.writings || []).length ? (native ? " · 习作" : " · 写作") : ""}</div>
         </a>`).join("");
       app.innerHTML = `
         <div class="top-bar">
           <a class="back" href="home.html">← 返回</a>
-          <h1>📚 六年级上册</h1>
+          <h1>📚 ${App.escapeHtml(data.book_title || "六年级上册")}</h1>
           <div style="width:40px"></div>
         </div>
         <div class="fit-body">
@@ -79,9 +80,10 @@
         </div>`;
     }
 
-    function renderUnitDetail(app, units, n) {
+    function renderUnitDetail(app, units, n, data) {
       const u = units.find(x => x.unit === n);
       if (!u) { location.hash = ""; return; }
+      const native = data.ui_mode === "native";
       const cards = u.lessons.map(l => `
         <a class="fit-card" href="lesson.html?lesson=${l.lesson_no}">
           <div class="fc-top">第 ${l.lesson_no} 课${l.type === "skim" ? " · 略读" : ""}</div>
@@ -90,13 +92,13 @@
       if (u.garden) cards.push(`
         <a class="fit-card" href="garden.html?unit=${u.unit}">
           <div class="fc-top">第${CN_NUM[u.unit] || u.unit}单元</div>
-          <div class="fc-title">📚 语文园地</div>
-          <div class="fc-sub">交流平台 · 词句段运用 · 日积月累</div>
+          <div class="fc-title">${native ? "📚 语文园地" : "📚 单元复习"}</div>
+          <div class="fc-sub">${native ? "交流平台 · 词句段运用 · 日积月累" : "词汇与句型 · 单元练习 · 文化小知识"}</div>
         </a>`);
       if ((u.writings || []).length) cards.push(`
         <a class="fit-card" href="writing.html?unit=${u.unit}">
-          <div class="fc-top">习作</div>
-          <div class="fc-title">✍️ ${App.escapeHtml(u.writings[0].title || "本单元习作")}</div>
+          <div class="fc-top">${native ? "习作" : "写作"}</div>
+          <div class="fc-title">✍️ ${App.escapeHtml(u.writings[0].title || (native ? "本单元习作" : "本单元写作"))}</div>
         </a>`);
       const first = (u.lessons[0] || {}).lesson_no || 1;
       cards.push(`
@@ -108,7 +110,7 @@
       app.innerHTML = `
         <div class="top-bar">
           <a class="back" href="lessons.html">← 单元</a>
-          <h1 class="t-cn">第${CN_NUM[n] || n}单元</h1>
+          <h1 class="t-cn">第${CN_NUM[n] || n}单元${u.name ? " · " + App.escapeHtml(u.name) : ""}</h1>
           <div style="width:40px"></div>
         </div>
         <div class="fit-body">
